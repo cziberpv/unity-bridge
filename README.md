@@ -23,7 +23,7 @@ AI Agent                        Unity Editor
 - 🔧 **Modify anything** -- create, delete, rename, duplicate GameObjects; add/remove components; set any serialized property
 - 🔬 **Lens system** -- filter inspect output by domain: `layout`, `physics`, `scripts`, `visual`, or `all`
 - 📸 **Screenshots** -- capture Game View by entering Play Mode automatically
-- 🖼️ **Texture catalog** -- scan, search, tag, and preview project textures
+- 🖼️ **Texture catalog** *(experimental)* -- scan, search, tag, and preview project textures
 - 🧪 **Scratch pad** -- run arbitrary one-off C# scripts inside the Editor
 - 📦 **Batch commands** -- send a JSON array, get a combined response
 - ⚡ **Compilation tracking** -- `refresh` triggers recompilation and returns errors or success
@@ -144,7 +144,9 @@ The lens system dramatically reduces token usage. A typical UI Canvas might prod
 |---------|-----------|-------------|
 | `screenshot` | `delay` | Enter Play Mode, wait `delay` seconds (default 1), capture Game View, exit Play Mode. Output: `Assets/LLM/Bridge/Screenshots/screenshot_{timestamp}.png` |
 
-### Texture Catalog
+### Texture Catalog (Experimental)
+
+> **Early stage.** The goal is to let AI agents build a local texture library -- scan, describe, tag, and auto-texture scenes. Usable today, but expect rough edges.
 
 | Command | Parameters | Description |
 |---------|-----------|-------------|
