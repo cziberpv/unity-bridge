@@ -17,6 +17,42 @@ AI Agent                        Unity Editor
    Read response                    |
 ```
 
+## Quick Start
+
+**You need:** Unity project (any version with Package Manager) + AI coding tool (Claude Code, Cursor, etc.)
+
+**Step 1.** [Download ZIP](https://github.com/cziberpv/unity-bridge/archive/refs/heads/master.zip) and extract it somewhere
+
+**Step 2.** Copy the `Assets/Editor/` folder into your Unity project's `Assets/` folder:
+```
+YourProject/
+  Assets/
+    Editor/          <-- paste here
+      UnityBridge.cs
+      UnityBridge.Read.cs
+      ...
+```
+
+**Step 3.** Copy `unity-cmd.ps1` to your project root (next to `Assets/`)
+
+**Step 4.** Install Newtonsoft.Json (required, Unity Bridge won't compile without it):
+1. In Unity: **Window** → **Package Manager**
+2. Click **+** (top-left) → **Add package by name...**
+3. Enter: `com.unity.nuget.newtonsoft-json`
+4. Click **Add**
+
+**Step 5.** Open Unity. Look for this message in the Console:
+```
+[UnityBridge] Initialized. Polling: Assets/LLM/Bridge/request.json
+```
+
+**Done!** Now tell your AI agent to use `unity-cmd.ps1` to talk to Unity. Try:
+```powershell
+.\unity-cmd.ps1 '{"type": "scene"}'
+```
+
+---
+
 ## Features
 
 - 🔍 **Read the scene** -- hierarchy, components, serialized properties, prefabs
