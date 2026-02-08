@@ -257,43 +257,10 @@ namespace Editor
 
         private static string HandleRequest(BridgeRequest request)
         {
-            return request.type.ToLower() switch
-            {
-                // Read commands
-                "scene" => HandleSceneRequest(),
-                "prefab" => HandlePrefabRequest(request.path ?? request.query),
-                "find" => HandleFindRequest(request.component ?? request.query),
-                "inspect" => HandleInspectRequest(request),
-                "prefabs" => HandlePrefabsListRequest(request.path ?? request.query),
-                "selection" => HandleSelectionRequest(),
-                "logs" => HandleLogsRequest(request.query),
-                "errors" => HandleErrorsRequest(),
-                "status" => HandleStatusRequest(),
-                "help" => HandleHelpRequest(),
-                // Scratch pad for one-time scripts
-                "scratch" => HandleScratch(),
-                // Screenshot
-                "screenshot" => HandleScreenshotRequest(request),
-                // Texture catalog
-                "texture-scan" => HandleTextureScan(request),
-                "texture-search" => HandleTextureSearch(request),
-                "texture-preview" => HandleTexturePreview(request),
-                "texture-tag" => HandleTextureTag(request),
-                "texture-tag-batch" => HandleTextureTagBatch(request),
-                // Write commands
-                "create" => HandleCreateRequest(request),
-                "delete" => HandleDeleteRequest(request),
-                "rename" => HandleRenameRequest(request),
-                "duplicate" => HandleDuplicateRequest(request),
-                "add-component" => HandleAddComponentRequest(request),
-                "delete-component" => HandleDeleteComponentRequest(request),
-                "set" => HandleSetRequest(request),
-                "save-scene" => HandleSaveSceneRequest(),
-                "new-scene" => HandleNewSceneRequest(request),
-                "open-scene" => HandleOpenSceneRequest(request),
-                "refresh" => HandleRefreshRequest(),
-                _ => $"Unknown request type: {request.type}\n\nUse `help` to see available commands."
-            };
+            if (CommandMap.TryGetValue(request.type.ToLower(), out var cmd))
+                return cmd.Handler(request);
+
+            return $"Unknown request type: {request.type}\n\nUse `help` to see available commands.";
         }
 
         #region Compilation Result
@@ -338,6 +305,99 @@ namespace Editor
             File.WriteAllText(ResponseFile, sb.ToString());
             Debug.Log($"[UnityBridge] Compilation {(success ? "succeeded" : "failed")} in {duration:F1}s");
         }
+
+        #endregion
+
+        #region Command Registry
+
+        private class CommandInfo
+        {
+            public readonly string Type;
+            public readonly string Fields;
+            public readonly string Description;
+            public readonly string Category;
+            public readonly Func<BridgeRequest, string> Handler;
+
+            public CommandInfo(string type, string fields, string description, string category,
+                Func<BridgeRequest, string> handler)
+            {
+                Type = type;
+                Fields = fields;
+                Description = description;
+                Category = category;
+                Handler = handler;
+            }
+        }
+
+        private static readonly CommandInfo[] Commands =
+        {
+            // Read
+            new("scene", "-", "Export current scene hierarchy", "Read",
+                _ => HandleSceneRequest()),
+            new("inspect", "path, depth, detail, lens", "Inspect GameObject with lens filter", "Read",
+                HandleInspectRequest),
+            new("find", "component", "Find GameObjects by component type or name", "Read",
+                req => HandleFindRequest(req.component ?? req.query)),
+            new("prefab", "path", "Export prefab structure with values", "Read",
+                req => HandlePrefabRequest(req.path ?? req.query)),
+            new("prefabs", "path", "List all prefabs in folder", "Read",
+                req => HandlePrefabsListRequest(req.path ?? req.query)),
+            new("selection", "-", "Export currently selected object", "Read",
+                _ => HandleSelectionRequest()),
+            new("errors", "-", "Show compilation errors (if any)", "Read",
+                _ => HandleErrorsRequest()),
+            new("status", "-", "Play Mode, compilation state, version", "Read",
+                _ => HandleStatusRequest()),
+            new("help", "-", "Show all commands with parameters", "Read",
+                _ => HandleHelpRequest()),
+
+            // Write
+            new("create", "path, components", "Create GameObject. Optional components array", "Write",
+                HandleCreateRequest),
+            new("delete", "path", "Delete a GameObject", "Write",
+                HandleDeleteRequest),
+            new("rename", "path, value", "Rename a GameObject", "Write",
+                HandleRenameRequest),
+            new("duplicate", "path, value", "Duplicate a GameObject", "Write",
+                HandleDuplicateRequest),
+            new("add-component", "path, component", "Add component to GameObject", "Write",
+                HandleAddComponentRequest),
+            new("delete-component", "path, component", "Remove a component", "Write",
+                HandleDeleteComponentRequest),
+            new("set", "path, component, property/value or properties", "Set serialized properties", "Write",
+                HandleSetRequest),
+            new("save-scene", "-", "Save current scene", "Write",
+                _ => HandleSaveSceneRequest()),
+            new("new-scene", "path, force", "Create and open new scene", "Write",
+                HandleNewSceneRequest),
+            new("open-scene", "path, force", "Open existing scene", "Write",
+                HandleOpenSceneRequest),
+            new("refresh", "-", "Recompile scripts, return errors or success", "Write",
+                _ => HandleRefreshRequest()),
+
+            // Advanced
+            new("screenshot", "delay", "Capture Game View via Play Mode (default delay: 1s)", "Advanced",
+                HandleScreenshotRequest),
+            new("scratch", "-", "Run one-off C# from UnityBridge.Scratch.cs", "Advanced",
+                _ => HandleScratch()),
+
+            // Texture (experimental)
+            new("texture-scan", "path", "Scan folder, build texture catalog", "Texture (Experimental)",
+                HandleTextureScan),
+            new("texture-search", "query", "Search catalog by tags/description", "Texture (Experimental)",
+                HandleTextureSearch),
+            new("texture-preview", "query, depth, value", "Generate visual preview grid", "Texture (Experimental)",
+                HandleTexturePreview),
+            new("texture-tag", "path, value, query", "Tag texture with description and keywords", "Texture (Experimental)",
+                HandleTextureTag),
+            new("texture-tag-batch", "value", "Batch-tag multiple textures", "Texture (Experimental)",
+                HandleTextureTagBatch),
+        };
+
+        private static Dictionary<string, CommandInfo> _commandMap;
+
+        private static Dictionary<string, CommandInfo> CommandMap =>
+            _commandMap ??= Commands.ToDictionary(c => c.Type);
 
         #endregion
 

@@ -18,56 +18,33 @@ File-based bridge between AI agents and Unity Editor. JSON commands in, markdown
 AI Agent → unity-cmd.ps1 → request.json → UnityBridge (polling) → response.md → stdout
 ```
 
-## Commands
+## Getting Started
 
 ```powershell
-# Execute a command
+# See all available commands with parameters and examples
 .\unity-cmd.ps1 '{"type": "help"}'
+
+# Read the scene
 .\unity-cmd.ps1 '{"type": "scene"}'
-.\unity-cmd.ps1 '{"type": "refresh"}' -Timeout 120
 
 # Batch commands
 .\unity-cmd.ps1 '[{"type": "create", "path": "Player"}, {"type": "add-component", "path": "Player", "component": "Rigidbody2D"}]'
+
+# Compile scripts and check for errors
+.\unity-cmd.ps1 '{"type": "refresh"}' -Timeout 120
 ```
 
-## Architecture
+The `help` command returns the full command reference with parameters, lens system, value types, and tips.
 
-### Files (Assets/Editor/)
+## Key Patterns
 
-| File | Purpose |
-|------|---------|
-| UnityBridge.cs | Init, command routing, compilation tracking |
-| UnityBridge.Read.cs | Read: scene, inspect, find, prefab, selection, errors, help, status |
-| UnityBridge.Write.cs | Write: create, add-component, set, save-scene, new-scene, open-scene, refresh |
-| UnityBridge.Helpers.cs | Utilities: path search, type resolution, hierarchy traversal |
-| UnityBridge.Lenses.cs | Lens system for component filtering |
-| UnityBridge.Scratch.cs | Scratch pad for one-off C# scripts |
-| UnityBridge.Screenshot.cs | Screenshots via Play Mode + EditorPrefs persistence + safety timeout |
-| UnityBridge.TextureCatalog.cs | Texture scanning, cataloging, and search |
+**Lens system** — filter inspect output by domain: `layout`, `physics`, `scripts`, `visual`, `all`.
 
-### Key patterns
+**Batch commands** — send a JSON array to execute multiple operations in one call.
 
-**Partial classes** — UnityBridge split across files via `partial class`.
+**Scratch pad** — edit `UnityBridge.Scratch.cs` for complex one-off automation, `refresh` + `scratch` to run.
 
-**EditorPrefs** — state that survives domain reload (e.g., screenshot pending flag).
-
-**Lens system** — component filtering by domain: `layout`, `physics`, `scripts`, `visual`, `all`.
-
-### JSON value types
-
-| Type | Format | Example |
-|------|--------|---------|
-| Vector2/3 | array | `[0.5, 0.5]` |
-| Color | array or hex | `[1, 0, 0, 1]` or `"#FF0000"` |
-| Enum | string or number | `"Volume"` or `2` |
-| ObjectReference | string with @ | `"@Path/To/Object"` or `"Assets/path.asset"` |
-
-## Communication files
-
-- **Request:** `Assets/LLM/Bridge/request.json`
-- **Response:** `Assets/LLM/Bridge/response.md`
-
-Polling every second via `EditorApplication.update`.
+**Property names** — use `m_` prefix for Unity internals (`m_LocalPosition`, `m_SizeDelta`). Short component names work (`Image`, not `UnityEngine.UI.Image`).
 
 ## Dependencies
 

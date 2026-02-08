@@ -357,115 +357,67 @@ namespace Editor
 
         private static string HandleHelpRequest()
         {
-            return @"# UnityBridge Commands
+            var sb = new StringBuilder();
+            sb.AppendLine("# UnityBridge Commands");
+            sb.AppendLine();
 
-## Read Commands
+            // Group commands by category, preserve registration order
+            var categories = new List<string>();
+            foreach (var cmd in Commands)
+            {
+                if (!categories.Contains(cmd.Category))
+                    categories.Add(cmd.Category);
+            }
 
-| Type | Fields | Description |
-|------|--------|-------------|
-| `scene` | - | Export current scene hierarchy |
-| `prefab` | `path` | Export prefab structure with values |
-| `find` | `component` | Find all GameObjects with component |
-| `inspect` | `path`, `depth`, `detail`, `lens` | Inspect GameObject with lens filter |
-| `prefabs` | `path` | List all prefabs in folder |
-| `selection` | - | Export currently selected object |
-| `errors` | - | Show compilation errors (if any) |
-| `status` | - | Show Play Mode, compilation state, version |
-| `help` | - | Show this help |
+            foreach (var category in categories)
+            {
+                sb.AppendLine($"## {category} Commands");
+                sb.AppendLine();
+                sb.AppendLine("| Type | Fields | Description |");
+                sb.AppendLine("|------|--------|-------------|");
 
-## Write Commands
+                foreach (var cmd in Commands)
+                {
+                    if (cmd.Category != category) continue;
+                    sb.AppendLine($"| `{cmd.Type}` | {cmd.Fields} | {cmd.Description} |");
+                }
 
-| Type | Fields | Description |
-|------|--------|-------------|
-| `create` | `path` | Create empty GameObject at path |
-| `add-component` | `path`, `component` | Add component to GameObject |
-| `set` | `path`, `component`, `property`/`value` or `properties` | Set serialized properties |
-| `save-scene` | - | Save current scene |
-| `new-scene` | `path` | Create and open new scene |
-| `open-scene` | `path` | Open existing scene |
-| `refresh` | - | Trigger AssetDatabase.Refresh() |
+                sb.AppendLine();
+            }
 
-## Examples
+            // Static reference docs (lens, value types, tips)
+            sb.Append(HelpReference);
+            return sb.ToString();
+        }
 
-### Read operations:
-```json
-{""type"": ""find"", ""component"": ""MultiNetworkAdapter""}
-{""type"": ""inspect"", ""path"": ""Game World/Ship""}
-{""type"": ""inspect"", ""path"": ""Game World"", ""depth"": 2, ""detail"": ""components""}
-{""type"": ""inspect"", ""path"": ""UI Canvas"", ""lens"": ""layout"", ""depth"": 2}
-{""type"": ""inspect"", ""path"": ""Game World/Ship"", ""lens"": ""scripts""}
-{""type"": ""prefab"", ""path"": ""Assets/Prefabs/Reactor.prefab""}
-```
+        private const string HelpReference = @"## Lens Parameter
 
-## Lens Parameter
-
-| Lens | Includes |
-|------|----------|
-| (none) | Minimal output with hints about available lenses |
+| Lens | Shows |
+|------|-------|
+| *(none)* | Names only + hints about available lenses |
 | `layout` | RectTransform, LayoutGroup, LayoutElement, ContentSizeFitter, Canvas, CanvasScaler |
 | `physics` | Transform, Rigidbody2D, Collider2D, Joint2D |
 | `scripts` | Custom MonoBehaviour (project scripts only) |
 | `visual` | SpriteRenderer, Image, RawImage, TMP_Text |
 | `all` | All components (no filtering) |
 
-```json
-```
+## Value Types for `set`
 
-### Create GameObject:
-```json
-{""type"": ""create"", ""path"": ""Game World/Station/NewDockingSlot""}
-```
+| Unity Type | JSON | Example |
+|-----------|------|---------|
+| Vector2/3 | array | `[1, 2, 3]` |
+| Color | array or hex | `[1, 0, 0, 1]` or `""#FF0000""` |
+| Enum | string or int | `""Volume""` or `2` |
+| ObjectReference | asset path | `""Assets/Sprites/Player.png""` or `""@Path/To/Object""` |
 
-### Add component:
-```json
-{""type"": ""add-component"", ""path"": ""Game World/Ship"", ""component"": ""MultiNetworkAdapter""}
-```
+## Tips
 
-### Set single property:
-```json
-{""type"": ""set"", ""path"": ""Game World/Ship"", ""component"": ""MultiNetworkAdapter"", ""property"": ""weight"", ""value"": ""10""}
-```
-
-### Set multiple properties:
-```json
-{""type"": ""set"", ""path"": ""Game World/Ship"", ""component"": ""MultiNetworkAdapter"", ""properties"": [
-  {""key"": ""weight"", ""value"": ""10""},
-  {""key"": ""maxFlowRate"", ""value"": ""100""}
-]}
-```
-
-### Batch request (multiple operations):
-```json
-[
-  {""type"": ""create"", ""path"": ""Game World/Station/DockingSlot""},
-  {""type"": ""add-component"", ""path"": ""Game World/Station/DockingSlot"", ""component"": ""DockingSlot""},
-  {""type"": ""set"", ""path"": ""Game World/Station/DockingSlot"", ""component"": ""DockingSlot"", ""properties"": [
-    {""key"": ""resourceType"", ""value"": ""Assets/Resources/ResourceTypes/Volume.asset""},
-    {""key"": ""maxFlowRate"", ""value"": ""100""}
-  ]}
-]
-```
-
-## Object References
-
-For ObjectReference properties, use asset paths directly:
-```json
-{""type"": ""set"", ""path"": ""../"", ""component"": ""MultiNetworkAdapter"", ""property"": ""resourceType"", ""value"": ""Assets/Resources/ResourceTypes/Energy.asset""}
-```
-
-Or use `@path` syntax for scene objects:
-```json
-{""value"": ""@Game World/Ship:Transform""}
-```
-
-## Compilation Check
-
-Use `errors` after writing code to verify it compiles:
-```json
-{""type"": ""errors""}
-```
+- **Batch:** send a JSON array to execute multiple commands in sequence
+- **Scratch:** edit `UnityBridge.Scratch.cs`, `refresh` to compile, `scratch` to run
+- **Property names:** use `m_` prefix for Unity internals (`m_LocalPosition`, `m_SizeDelta`)
+- **Component names:** short form works (`Image`, not `UnityEngine.UI.Image`)
+- **Input System:** this project uses the new Input System, not legacy Input
 ";
-        }
 
         #endregion
     }
