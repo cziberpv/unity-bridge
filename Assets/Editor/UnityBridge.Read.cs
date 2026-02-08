@@ -323,6 +323,38 @@ namespace Editor
             return sb.ToString();
         }
 
+        private static string HandleStatusRequest()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("# UnityBridge Status");
+            sb.AppendLine();
+            sb.AppendLine($"**Version:** 1.1");
+            sb.AppendLine($"**Play Mode:** {(EditorApplication.isPlaying ? "Yes" : "No")}");
+            sb.AppendLine($"**Compiling:** {(EditorApplication.isCompiling ? "Yes" : "No")}");
+            sb.AppendLine();
+
+            if (_lastCompilationErrors.Count > 0)
+            {
+                sb.AppendLine($"**Compilation Errors:** {_lastCompilationErrors.Count}");
+                foreach (var error in _lastCompilationErrors)
+                {
+                    sb.AppendLine($"- `{Path.GetFileName(error.file)}:{error.line}` {error.message}");
+                }
+            }
+            else
+            {
+                sb.AppendLine("**Compilation Errors:** None");
+            }
+
+            if (EditorPrefs.GetBool(PrefKeyScreenshotPending, false))
+            {
+                sb.AppendLine();
+                sb.AppendLine("**Screenshot:** Pending");
+            }
+
+            return sb.ToString();
+        }
+
         private static string HandleHelpRequest()
         {
             return @"# UnityBridge Commands
@@ -338,6 +370,7 @@ namespace Editor
 | `prefabs` | `path` | List all prefabs in folder |
 | `selection` | - | Export currently selected object |
 | `errors` | - | Show compilation errors (if any) |
+| `status` | - | Show Play Mode, compilation state, version |
 | `help` | - | Show this help |
 
 ## Write Commands

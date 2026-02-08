@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
@@ -12,60 +13,77 @@ namespace Editor
     /// Usage: {"type": "screenshot", "delay": 2}
     /// - delay: seconds to wait after Play Mode starts (default: 1)
     ///
+    /// Safety: guaranteed exit from Play Mode via timeout.
+    /// Runtime errors during Play Mode are captured and included in response.
     /// State survives domain reload via EditorPrefs.
     /// </summary>
     public static partial class UnityBridge
     {
         private const string ScreenshotFolder = "Assets/LLM/Bridge/Screenshots";
+        private const float ScreenshotSafetyMargin = 30f;
 
         // EditorPrefs keys for state persistence across domain reload
         private const string PrefKeyScreenshotPending = "UnityBridge.Screenshot.Pending";
         private const string PrefKeyScreenshotDelay = "UnityBridge.Screenshot.Delay";
         private const string PrefKeyScreenshotStartTime = "UnityBridge.Screenshot.StartTime";
         private const string PrefKeyScreenshotPath = "UnityBridge.Screenshot.Path";
+        private const string PrefKeyScreenshotCaptured = "UnityBridge.Screenshot.Captured";
 
-        private static bool _screenshotSubscribed = false;
+        private static bool _screenshotSubscribed;
+        private static bool _screenshotErrorsSubscribed;
+        private static readonly List<string> _screenshotRuntimeErrors = new();
 
         /// <summary>
         /// Call this from UnityBridge static constructor to setup screenshot monitoring.
         /// </summary>
         static partial void InitializeScreenshot()
         {
-            // Check if we have a pending screenshot (after domain reload)
-            if (EditorPrefs.GetBool(PrefKeyScreenshotPending, false))
+            if (!EditorPrefs.GetBool(PrefKeyScreenshotPending, false)) return;
+
+            // Stale state detection: if not in Play Mode and started long ago, clean up
+            if (!EditorApplication.isPlaying)
             {
-                SubscribeToScreenshotUpdate();
+                var startTimeStr = EditorPrefs.GetString(PrefKeyScreenshotStartTime, "");
+                if (!string.IsNullOrEmpty(startTimeStr))
+                {
+                    var elapsed = (DateTime.Now - DateTime.Parse(startTimeStr)).TotalSeconds;
+                    if (elapsed > 120)
+                    {
+                        Debug.LogWarning("[UnityBridge] Cleaning up stale screenshot state");
+                        ClearScreenshotState();
+                        return;
+                    }
+                }
             }
+
+            SubscribeToScreenshotUpdate();
         }
 
         private static string HandleScreenshotRequest(BridgeRequest request)
         {
-            // Parse delay (default 1 second)
             float delay = request.delay > 0 ? request.delay : 1f;
 
-            // Generate output path
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
             var filename = $"screenshot_{timestamp}.png";
             var fullPath = Path.Combine(ScreenshotFolder, filename);
 
-            // Ensure folder exists
             Directory.CreateDirectory(ScreenshotFolder);
 
             // Save state to EditorPrefs (survives domain reload)
             EditorPrefs.SetBool(PrefKeyScreenshotPending, true);
+            EditorPrefs.SetBool(PrefKeyScreenshotCaptured, false);
             EditorPrefs.SetFloat(PrefKeyScreenshotDelay, delay);
             EditorPrefs.SetString(PrefKeyScreenshotStartTime, DateTime.Now.ToString("O"));
             EditorPrefs.SetString(PrefKeyScreenshotPath, fullPath);
 
-            // Subscribe to update before entering Play Mode
+            _screenshotRuntimeErrors.Clear();
+            SubscribeToRuntimeErrors();
             SubscribeToScreenshotUpdate();
 
-            // Enter Play Mode
             Debug.Log($"[UnityBridge] Screenshot: entering Play Mode, delay={delay}s, output={fullPath}");
             EditorApplication.isPlaying = true;
 
-            // Response will be written by ScreenshotUpdate after capture
-            return null; // Don't write response yet
+            return null; // Response written by ScreenshotUpdate after capture
         }
 
         private static void SubscribeToScreenshotUpdate()
@@ -81,22 +99,35 @@ namespace Editor
             EditorApplication.update -= ScreenshotUpdate;
         }
 
+        private static void SubscribeToRuntimeErrors()
+        {
+            if (_screenshotErrorsSubscribed) return;
+            _screenshotErrorsSubscribed = true;
+            Application.logMessageReceived += OnScreenshotRuntimeLog;
+        }
+
+        private static void UnsubscribeFromRuntimeErrors()
+        {
+            _screenshotErrorsSubscribed = false;
+            Application.logMessageReceived -= OnScreenshotRuntimeLog;
+        }
+
+        private static void OnScreenshotRuntimeLog(string message, string stackTrace, LogType type)
+        {
+            if (type == LogType.Error || type == LogType.Exception)
+            {
+                _screenshotRuntimeErrors.Add($"[{type}] {message}");
+            }
+        }
+
         private static void ScreenshotUpdate()
         {
-            // Check if we have pending screenshot
             if (!EditorPrefs.GetBool(PrefKeyScreenshotPending, false))
             {
                 UnsubscribeFromScreenshotUpdate();
                 return;
             }
 
-            // Wait until we're actually in Play Mode and playing
-            if (!EditorApplication.isPlaying || EditorApplication.isPaused)
-            {
-                return;
-            }
-
-            // Check if enough time has passed
             var startTimeStr = EditorPrefs.GetString(PrefKeyScreenshotStartTime, "");
             if (string.IsNullOrEmpty(startTimeStr))
             {
@@ -108,46 +139,65 @@ namespace Editor
             var delay = EditorPrefs.GetFloat(PrefKeyScreenshotDelay, 1f);
             var elapsed = (DateTime.Now - startTime).TotalSeconds;
 
-            if (elapsed < delay)
+            // Safety timeout: force exit Play Mode regardless of state
+            if (elapsed > delay + ScreenshotSafetyMargin)
             {
-                return; // Still waiting
+                Debug.LogError($"[UnityBridge] Screenshot safety timeout after {elapsed:F0}s — forcing exit from Play Mode");
+                var path = EditorPrefs.GetString(PrefKeyScreenshotPath, "");
+                WriteScreenshotResponse(path, false,
+                    $"Safety timeout: Play Mode exceeded {delay + ScreenshotSafetyMargin:F0}s limit",
+                    _screenshotRuntimeErrors);
+                if (EditorApplication.isPlaying)
+                    EditorApplication.isPlaying = false;
+                ClearScreenshotState();
+                return;
             }
 
-            // Time to capture!
-            var path = EditorPrefs.GetString(PrefKeyScreenshotPath, "");
-            if (string.IsNullOrEmpty(path))
+            // Wait until actually in Play Mode
+            if (!EditorApplication.isPlaying || EditorApplication.isPaused)
+                return;
+
+            // Wait for delay
+            if (elapsed < delay)
+                return;
+
+            // Already captured — waiting for delayCall to finish
+            if (EditorPrefs.GetBool(PrefKeyScreenshotCaptured, false))
+                return;
+
+            // Capture
+            var capturePath = EditorPrefs.GetString(PrefKeyScreenshotPath, "");
+            if (string.IsNullOrEmpty(capturePath))
             {
                 ClearScreenshotState();
                 return;
             }
 
-            Debug.Log($"[UnityBridge] Capturing screenshot to: {path}");
+            Debug.Log($"[UnityBridge] Capturing screenshot to: {capturePath}");
+            EditorPrefs.SetBool(PrefKeyScreenshotCaptured, true);
 
             try
             {
-                // TODO: Add JPEG support for smaller file sizes
-                // Currently PNG only, JPEG requires post-capture conversion
-                ScreenCapture.CaptureScreenshot(path);
+                ScreenCapture.CaptureScreenshot(capturePath);
 
-                // Schedule exit from Play Mode and response writing
-                // Need to wait a frame for screenshot to be written
+                // Wait frames for screenshot file to be written, then exit Play Mode
                 EditorApplication.delayCall += () =>
                 {
                     EditorApplication.delayCall += () =>
                     {
-                        WriteScreenshotResponse(path, true, null);
+                        WriteScreenshotResponse(capturePath, true, null, _screenshotRuntimeErrors);
                         EditorApplication.isPlaying = false;
+                        ClearScreenshotState();
                     };
                 };
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[UnityBridge] Screenshot failed: {ex.Message}");
-                WriteScreenshotResponse(path, false, ex.Message);
+                WriteScreenshotResponse(capturePath, false, ex.Message, _screenshotRuntimeErrors);
                 EditorApplication.isPlaying = false;
+                ClearScreenshotState();
             }
-
-            ClearScreenshotState();
         }
 
         private static void ClearScreenshotState()
@@ -156,10 +206,13 @@ namespace Editor
             EditorPrefs.DeleteKey(PrefKeyScreenshotDelay);
             EditorPrefs.DeleteKey(PrefKeyScreenshotStartTime);
             EditorPrefs.DeleteKey(PrefKeyScreenshotPath);
+            EditorPrefs.DeleteKey(PrefKeyScreenshotCaptured);
             UnsubscribeFromScreenshotUpdate();
+            UnsubscribeFromRuntimeErrors();
+            _screenshotRuntimeErrors.Clear();
         }
 
-        private static void WriteScreenshotResponse(string path, bool success, string error)
+        private static void WriteScreenshotResponse(string path, bool success, string error, List<string> runtimeErrors)
         {
             var sb = new System.Text.StringBuilder();
             sb.AppendLine("<!-- Request: screenshot -->");
@@ -181,6 +234,17 @@ namespace Editor
                 sb.AppendLine("**Status:** Failed");
                 sb.AppendLine();
                 sb.AppendLine($"**Error:** {error}");
+            }
+
+            if (runtimeErrors != null && runtimeErrors.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine($"## Runtime Errors ({runtimeErrors.Count})");
+                sb.AppendLine();
+                foreach (var err in runtimeErrors)
+                {
+                    sb.AppendLine($"- {err}");
+                }
             }
 
             File.WriteAllText(ResponseFile, sb.ToString());

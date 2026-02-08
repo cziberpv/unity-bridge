@@ -268,6 +268,7 @@ namespace Editor
                 "selection" => HandleSelectionRequest(),
                 "logs" => HandleLogsRequest(request.query),
                 "errors" => HandleErrorsRequest(),
+                "status" => HandleStatusRequest(),
                 "help" => HandleHelpRequest(),
                 // Scratch pad for one-time scripts
                 "scratch" => HandleScratch(),
