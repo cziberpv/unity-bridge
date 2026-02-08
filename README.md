@@ -2,21 +2,6 @@
 
 **Let AI agents see and control Unity Editor through plain files.**
 
----
-
-Unity Bridge is a set of Editor scripts that give AI coding agents (Claude Code, Cursor, etc.) full access to Unity Editor via a file-based protocol. No sockets, no servers, no MCP, no dependencies beyond Newtonsoft.Json. Drop the scripts into `Assets/Editor/`, and your AI agent can read scenes, create GameObjects, set properties, take screenshots, and run arbitrary C# -- all through JSON commands.
-
-```
-AI Agent                        Unity Editor
-   |                                |
-   |-- write request.json --------->|
-   |                                | (polling every 1s)
-   |                                | Process command
-   |<-------- response.md ---------|
-   |                                |
-   Read response                    |
-```
-
 ## Quick Start
 
 **You need:** Unity project (any version with Package Manager) + AI coding tool (Claude Code, Cursor, etc.)
@@ -66,6 +51,19 @@ YourProject/
 - 🎯 **Zero config** -- copy files to `Assets/Editor/`, done
 
 ## How It Works
+
+Unity Bridge is a set of Editor scripts that give AI coding agents (Claude Code, Cursor, etc.) full access to Unity Editor via a file-based protocol. No sockets, no servers, no MCP, no dependencies beyond Newtonsoft.Json. Drop the scripts into `Assets/Editor/`, and your AI agent can read scenes, create GameObjects, set properties, take screenshots, and run arbitrary C# -- all through JSON commands.
+
+```
+AI Agent                        Unity Editor
+   |                                |
+   |-- write request.json --------->|
+   |                                | (polling every 1s)
+   |                                | Process command
+   |<-------- response.md ---------|
+   |                                |
+   Read response                    |
+```
 
 ```
 ┌─────────────────┐     ┌──────────────┐     ┌─────────────────────┐
