@@ -22,45 +22,60 @@ namespace Editor
         static UnityBridgePostInstall()
         {
             var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(UnityBridgePostInstall).Assembly);
-            if (packageInfo == null) return;
+            if (packageInfo == null)
+            {
+                Debug.LogWarning("[UnityBridge PostInstall] Could not find package info. Files not exported.");
+                return;
+            }
 
             var packagePath = packageInfo.resolvedPath;
             var currentVersion = packageInfo.version;
             var installedVersion = EditorPrefs.GetString(VersionPrefKey, "");
 
+            Debug.Log($"[UnityBridge PostInstall] Package: {packagePath}, version: {currentVersion}, installed: {installedVersion}");
+
+            Directory.CreateDirectory("Assets/Editor");
+
             // Always ensure scratch template exists
             if (!File.Exists(ScratchPath))
             {
-                Directory.CreateDirectory("Assets/Editor");
                 File.WriteAllText(ScratchPath, ScratchTemplate);
-                AssetDatabase.Refresh();
                 Debug.Log("[UnityBridge] Created scratch pad: " + ScratchPath);
             }
 
             // Copy CLAUDE.md if missing
             if (!File.Exists(ClaudeMdPath))
             {
-                Directory.CreateDirectory("Assets/Editor");
                 var source = Path.Combine(packagePath, "Editor", "CLAUDE.md");
                 if (File.Exists(source))
                 {
                     File.Copy(source, ClaudeMdPath);
                     Debug.Log("[UnityBridge] Copied CLAUDE.md to " + ClaudeMdPath);
                 }
+                else
+                {
+                    Debug.LogWarning($"[UnityBridge PostInstall] CLAUDE.md not found at: {source}");
+                }
             }
 
             // Copy/update unity-cmd.ps1 on install or version change
-            if (installedVersion != currentVersion)
+            if (installedVersion != currentVersion || !File.Exists(CmdScriptPath))
             {
                 var source = Path.Combine(packagePath, "unity-cmd.ps1");
                 if (File.Exists(source))
                 {
                     File.Copy(source, CmdScriptPath, overwrite: true);
-                    Debug.Log("[UnityBridge] Copied unity-cmd.ps1 to project root");
+                    Debug.Log("[UnityBridge] Copied unity-cmd.ps1 to project root (v" + currentVersion + ")");
+                }
+                else
+                {
+                    Debug.LogWarning($"[UnityBridge PostInstall] unity-cmd.ps1 not found at: {source}");
                 }
 
                 EditorPrefs.SetString(VersionPrefKey, currentVersion);
             }
+
+            AssetDatabase.Refresh();
         }
 
         private const string ScratchTemplate =
