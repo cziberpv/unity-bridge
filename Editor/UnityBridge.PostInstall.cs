@@ -21,7 +21,7 @@ namespace Editor
 
         static UnityBridgePostInstall()
         {
-            var packageInfo = PackageInfo.FindForAssembly(typeof(UnityBridgePostInstall).Assembly);
+            var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(UnityBridgePostInstall).Assembly);
             if (packageInfo == null) return;
 
             var packagePath = packageInfo.resolvedPath;
