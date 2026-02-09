@@ -22,18 +22,6 @@ You'll see in the Console:
 
 Now tell your AI to use `unity-cmd.ps1` — or just ask it to make a game.
 
-## One-Prompt Install
-
-Give this link to your AI agent and ask it to install Unity Bridge:
-
-```
-https://raw.githubusercontent.com/cziberpv/unity-bridge/master/INSTALL.md
-```
-
-The AI will handle everything — dependencies, files, configuration. No manual steps.
-
----
-
 ## Features
 
 - 🔍 **Read the scene** -- hierarchy, components, serialized properties, prefabs
@@ -235,23 +223,6 @@ Response:
 3. [+] set: Set `Player` SpriteRenderer:
 ```
 
-## Setup
-
-### Option A: Package Manager (Recommended)
-
-In Unity: **Window → Package Manager → + → Add package from git URL:**
-```
-https://github.com/cziberpv/unity-bridge.git
-```
-
-Dependencies install automatically. `unity-cmd.ps1` is copied to your project root.
-
-### Option B: Manual
-
-1. Download and copy `Editor/` folder contents into your project's `Assets/Editor/`
-2. Install `com.unity.nuget.newtonsoft-json` via Package Manager
-3. Copy `unity-cmd.ps1` to your project root
-
 ## Usage with Claude Code
 
 Add this to your project's `CLAUDE.md`:
@@ -374,7 +345,8 @@ UnityBridge (partial class, [InitializeOnLoad])
 ├── UnityBridge.Screenshot.cs    Play Mode screenshot capture with EditorPrefs persistence
 ├── UnityBridge.TextureCatalog.cs    Texture scanning, hashing, search, preview, tagging
 ├── UnityBridge.PostInstall.cs  Auto-copies unity-cmd.ps1 and scratch template to project
-└── UnityBridge.Scratch.cs   One-off script execution pad
+├── UnityBridge.Scratch.cs   One-off script execution pad
+└── HierarchyExporter.cs     Scene hierarchy JSON export
 ```
 
 Everything is a single `static partial class`. No MonoBehaviours, no ScriptableObjects, no runtime code. Pure Editor scripts.

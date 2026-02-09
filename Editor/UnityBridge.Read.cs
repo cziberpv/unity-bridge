@@ -388,6 +388,12 @@ namespace Editor
 
             // Static reference docs (lens, value types, tips)
             sb.Append(HelpReference);
+
+            // Dynamic: detect active Input System
+            var inputTip = DetectInputSystem();
+            if (inputTip != null)
+                sb.AppendLine(inputTip);
+
             return sb.ToString();
         }
 
@@ -417,8 +423,20 @@ namespace Editor
 - **Scratch:** edit `UnityBridge.Scratch.cs`, `refresh` to compile, `scratch` to run
 - **Property names:** use `m_` prefix for Unity internals (`m_LocalPosition`, `m_SizeDelta`)
 - **Component names:** short form works (`Image`, not `UnityEngine.UI.Image`)
-- **Input System:** this project uses the new Input System, not legacy Input
 ";
+
+        private static string DetectInputSystem()
+        {
+            #if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
+            return "- **Input System:** this project uses the **new Input System** (UnityEngine.InputSystem). Use `InputAction`, `PlayerInput`, etc.";
+            #elif ENABLE_INPUT_SYSTEM && ENABLE_LEGACY_INPUT_MANAGER
+            return "- **Input System:** this project uses **both** Input Systems. Prefer the new Input System (`InputAction`) but `UnityEngine.Input` also works.";
+            #elif ENABLE_LEGACY_INPUT_MANAGER
+            return "- **Input System:** this project uses **legacy Input** (`UnityEngine.Input`). Use `Input.GetAxis()`, `Input.GetKey()`, etc.";
+            #else
+            return null;
+            #endif
+        }
 
         #endregion
     }

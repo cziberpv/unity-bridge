@@ -49,4 +49,4 @@ The `help` command returns the full command reference with parameters, lens syst
 ## Dependencies
 
 - `com.unity.nuget.newtonsoft-json`
-- `com.unity.inputsystem` (new Input System, not legacy)
+- `com.unity.textmeshpro`
