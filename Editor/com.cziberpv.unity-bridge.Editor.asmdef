@@ -1,5 +1,5 @@
 {
-    "name": "Editor",
+    "name": "com.cziberpv.unity-bridge.Editor",
     "rootNamespace": "",
     "references": [
         "Unity.Newtonsoft.Json",

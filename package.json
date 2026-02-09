@@ -1,0 +1,24 @@
+{
+    "name": "com.cziberpv.unity-bridge",
+    "version": "1.0.0",
+    "displayName": "Unity Bridge",
+    "description": "File-based bridge between AI agents and Unity Editor. JSON commands in, markdown responses out.",
+    "unity": "2021.3",
+    "license": "MIT",
+    "author": {
+        "name": "Pavel Tsiber",
+        "url": "https://github.com/cziberpv"
+    },
+    "keywords": [
+        "ai",
+        "automation",
+        "editor",
+        "bridge",
+        "agent",
+        "tools"
+    ],
+    "dependencies": {
+        "com.unity.nuget.newtonsoft-json": "3.2.1",
+        "com.unity.textmeshpro": "3.0.6"
+    }
+}
