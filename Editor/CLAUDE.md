@@ -42,7 +42,7 @@ The `help` command returns the full command reference with parameters, lens syst
 
 **Batch commands** — send a JSON array to execute multiple operations in one call.
 
-**Scratch pad** — edit `UnityBridge.Scratch.cs` for complex one-off automation, `refresh` + `scratch` to run.
+**Scratch pad** — edit `Assets/Editor/BridgeScratch.cs` for complex one-off automation, `refresh` + `scratch` to run.
 
 **Property names** — use `m_` prefix for Unity internals (`m_LocalPosition`, `m_SizeDelta`). Short component names work (`Image`, not `UnityEngine.UI.Image`).
 
