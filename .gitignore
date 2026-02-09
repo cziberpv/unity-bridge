@@ -12,8 +12,7 @@
 [Ll]ogs/
 [Uu]ser[Ss]ettings/
 
-# Unity meta files
-*.meta
+# Unity meta files — NOT ignored (required for UPM package)
 
 # Visual Studio / Rider
 .vs/
