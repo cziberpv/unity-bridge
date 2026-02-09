@@ -9,14 +9,14 @@ namespace Editor
     /// Copies required files from the UPM package to the user's project:
     /// - unity-cmd.ps1 → project root (updated on package version change)
     /// - BridgeScratch.cs → Assets/Editor/ (template, only if missing)
-    /// - CLAUDE.md → Assets/Editor/ (only if missing)
+    /// - ReadMe.ai → Assets/Editor/ (only if missing)
     /// </summary>
     [InitializeOnLoad]
     public static class UnityBridgePostInstall
     {
         private const string VersionPrefKey = "UnityBridge.InstalledVersion";
         private const string ScratchPath = "Assets/Editor/BridgeScratch.cs";
-        private const string ClaudeMdPath = "Assets/Editor/CLAUDE.md";
+        private const string ReadMeAiPath = "Assets/Editor/ReadMe.ai";
         private const string CmdScriptPath = "unity-cmd.ps1";
 
         static UnityBridgePostInstall()
@@ -43,18 +43,18 @@ namespace Editor
                 Debug.Log("[UnityBridge] Created scratch pad: " + ScratchPath);
             }
 
-            // Copy CLAUDE.md if missing
-            if (!File.Exists(ClaudeMdPath))
+            // Copy ReadMe.ai if missing
+            if (!File.Exists(ReadMeAiPath))
             {
-                var source = Path.Combine(packagePath, "Editor", "CLAUDE.md");
+                var source = Path.Combine(packagePath, "Editor", "ReadMe.ai");
                 if (File.Exists(source))
                 {
-                    File.Copy(source, ClaudeMdPath);
-                    Debug.Log("[UnityBridge] Copied CLAUDE.md to " + ClaudeMdPath);
+                    File.Copy(source, ReadMeAiPath);
+                    Debug.Log("[UnityBridge] Copied ReadMe.ai to " + ReadMeAiPath);
                 }
                 else
                 {
-                    Debug.LogWarning($"[UnityBridge PostInstall] CLAUDE.md not found at: {source}");
+                    Debug.LogWarning($"[UnityBridge PostInstall] ReadMe.ai not found at: {source}");
                 }
             }
 
