@@ -4,21 +4,33 @@
 
 ## Quick Start
 
-**You need:** a Unity project + an AI coding tool (Claude Code, Cursor, etc.)
+**You need:** a Unity project (2021.3+) + an AI coding tool (Claude Code, Cursor, etc.)
 
-- [ ] **Install JSON library** — in Unity: **Window → Package Manager → + → Add package by name:**
-  ```
-  com.unity.nuget.newtonsoft-json
-  ```
-- [ ] **[Download ZIP](https://github.com/cziberpv/unity-bridge/archive/refs/heads/master.zip)** and extract it
-- [ ] **Copy `Assets/` and `unity-cmd.ps1`** from the extracted folder into your Unity project root
+**Install via Package Manager:**
 
-That's it. Unity will compile the scripts and you'll see in the Console:
+In Unity: **Window → Package Manager → + → Add package from git URL:**
+```
+https://github.com/cziberpv/unity-bridge.git
+```
+
+That's it. Unity Bridge installs dependencies automatically and copies `unity-cmd.ps1` to your project root.
+
+You'll see in the Console:
 ```
 [UnityBridge] Initialized. Polling: Assets/LLM/Bridge/request.json
 ```
 
 Now tell your AI to use `unity-cmd.ps1` — or just ask it to make a game.
+
+## One-Prompt Install
+
+Give this link to your AI agent and ask it to install Unity Bridge:
+
+```
+https://raw.githubusercontent.com/cziberpv/unity-bridge/master/INSTALL.md
+```
+
+The AI will handle everything — dependencies, files, configuration. No manual steps.
 
 ---
 
@@ -32,11 +44,11 @@ Now tell your AI to use `unity-cmd.ps1` — or just ask it to make a game.
 - 🧪 **Scratch pad** -- run arbitrary one-off C# scripts inside the Editor
 - 📦 **Batch commands** -- send a JSON array, get a combined response
 - ⚡ **Compilation tracking** -- `refresh` triggers recompilation and returns errors or success
-- 🎯 **Zero config** -- copy files to `Assets/Editor/`, done
+- 🎯 **Zero config** -- one git URL in Package Manager, done
 
 ## How It Works
 
-Unity Bridge is a set of Editor scripts that give AI coding agents (Claude Code, Cursor, etc.) full access to Unity Editor via a file-based protocol. No sockets, no servers, no MCP, no dependencies beyond Newtonsoft.Json. Drop the scripts into `Assets/Editor/`, and your AI agent can read scenes, create GameObjects, set properties, take screenshots, and run arbitrary C# -- all through JSON commands.
+Unity Bridge is a set of Editor scripts that give AI coding agents (Claude Code, Cursor, etc.) full access to Unity Editor via a file-based protocol. No sockets, no servers, no MCP. Install via Unity Package Manager, and your AI agent can read scenes, create GameObjects, set properties, take screenshots, and run arbitrary C# -- all through JSON commands.
 
 ```
 AI Agent                        Unity Editor
@@ -178,7 +190,7 @@ The lens system dramatically reduces token usage. A typical UI Canvas might prod
 
 | Command | Parameters | Description |
 |---------|-----------|-------------|
-| `scratch` | -- | Execute the `HandleScratch()` method in `UnityBridge.Scratch.cs` |
+| `scratch` | -- | Execute `BridgeScratch.Run()` from `Assets/Editor/BridgeScratch.cs` |
 
 Edit the scratch file with any C# code, call `refresh` to compile, then `scratch` to run. One file for ad-hoc automation -- no dead code accumulation.
 
@@ -225,45 +237,20 @@ Response:
 
 ## Setup
 
-### 1. Copy Editor Scripts
+### Option A: Package Manager (Recommended)
 
-Copy the `Assets/Editor/` folder into your Unity project's `Assets/Editor/`:
-
+In Unity: **Window → Package Manager → + → Add package from git URL:**
 ```
-YourProject/
-  Assets/
-    Editor/
-      UnityBridge.cs
-      UnityBridge.Read.cs
-      UnityBridge.Write.cs
-      UnityBridge.Lenses.cs
-      UnityBridge.Helpers.cs
-      UnityBridge.Screenshot.cs
-      UnityBridge.TextureCatalog.cs
-      UnityBridge.Scratch.cs
+https://github.com/cziberpv/unity-bridge.git
 ```
 
-### 2. Install Newtonsoft.Json
+Dependencies install automatically. `unity-cmd.ps1` is copied to your project root.
 
-If not already installed, add via Unity Package Manager:
+### Option B: Manual
 
-```
-com.unity.nuget.newtonsoft-json
-```
-
-### 3. Copy the PowerShell Wrapper
-
-Place `unity-cmd.ps1` at your project root (next to `Assets/`).
-
-### 4. Open Unity
-
-UnityBridge initializes automatically via `[InitializeOnLoad]`. You'll see in the Console:
-
-```
-[UnityBridge] Initialized. Polling: Assets/LLM/Bridge/request.json
-```
-
-That's it. No configuration needed.
+1. Download and copy `Editor/` folder contents into your project's `Assets/Editor/`
+2. Install `com.unity.nuget.newtonsoft-json` via Package Manager
+3. Copy `unity-cmd.ps1` to your project root
 
 ## Usage with Claude Code
 
@@ -330,8 +317,8 @@ powershell -ExecutionPolicy Bypass -File unity-cmd.ps1 '{"type": "refresh"}' -Ti
 Instead of 50+ JSON commands to create a grid of objects:
 
 ```csharp
-// Edit UnityBridge.Scratch.cs → HandleScratch()
-private static string HandleScratch()
+// Edit Assets/Editor/BridgeScratch.cs → Run()
+public static string Run()
 {
     for (int x = 0; x < 8; x++)
     for (int y = 0; y < 4; y++)
@@ -366,7 +353,7 @@ Games created entirely by AI agents using Unity Bridge, without human interactio
 |---|---|---|
 | **Protocol** | File I/O (request.json / response.md) | WebSocket / HTTP |
 | **Dependencies** | Newtonsoft.Json (ships with Unity) | MCP server, SDK, runtime |
-| **Setup** | Copy files to `Assets/Editor/` | Install server, configure ports, manage process |
+| **Setup** | One git URL in Package Manager | Install server, configure ports, manage process |
 | **Works when Unity not focused** | Yes (file polling) | Depends on implementation |
 | **Domain reload safe** | Yes (EditorPrefs persistence) | Must handle reconnection |
 | **Agent integration** | Any agent that can write files and run shell commands | Requires MCP client support |
@@ -386,6 +373,7 @@ UnityBridge (partial class, [InitializeOnLoad])
 ├── UnityBridge.Helpers.cs   Path resolution, type lookup, hierarchy traversal, response writing
 ├── UnityBridge.Screenshot.cs    Play Mode screenshot capture with EditorPrefs persistence
 ├── UnityBridge.TextureCatalog.cs    Texture scanning, hashing, search, preview, tagging
+├── UnityBridge.PostInstall.cs  Auto-copies unity-cmd.ps1 and scratch template to project
 └── UnityBridge.Scratch.cs   One-off script execution pad
 ```
 

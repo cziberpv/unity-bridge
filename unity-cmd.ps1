@@ -6,22 +6,57 @@
     Works even when Unity is not focused (Unity uses polling).
 .PARAMETER Command
     JSON command string, e.g. '{"type": "help"}'
+.PARAMETER File
+    Path to a JSON file containing the command. Use this instead of Command
+    when your JSON is complex and PowerShell string escaping mangles it.
 .PARAMETER Timeout
     Timeout in seconds (default: 60 for compilation)
 .EXAMPLE
     .\unity-cmd.ps1 '{"type": "help"}'
     .\unity-cmd.ps1 '{"type": "refresh"}' -Timeout 120
-    .\unity-cmd.ps1 '{"type": "scene"}'
+    .\unity-cmd.ps1 -File request.json
+    .\unity-cmd.ps1 -f complex-batch.json -Timeout 120
 #>
 param(
-    [Parameter(Mandatory=$true, Position=0)]
+    [Parameter(Mandatory=$false, Position=0)]
     [string]$Command,
+
+    [Parameter(Mandatory=$false)]
+    [Alias("f")]
+    [string]$File,
 
     [Parameter(Mandatory=$false)]
     [int]$Timeout = 60
 )
 
 $ErrorActionPreference = "Stop"
+
+# Resolve input: -File or positional Command, not both
+if ($File -and $Command) {
+    Write-Error "Specify either -File or a command string, not both."
+    exit 1
+}
+
+if ($File) {
+    if (-not (Test-Path $File)) {
+        Write-Error "File not found: $File"
+        exit 1
+    }
+    $Command = Get-Content $File -Raw -Encoding UTF8
+    if (-not $Command -or $Command.Trim().Length -eq 0) {
+        Write-Error "File is empty: $File"
+        exit 1
+    }
+} elseif (-not $Command) {
+    Write-Host "Usage: unity-cmd.ps1 <json-command> [-Timeout <seconds>]"
+    Write-Host "       unity-cmd.ps1 -File <path.json> [-Timeout <seconds>]"
+    Write-Host ""
+    Write-Host "Examples:"
+    Write-Host "  .\unity-cmd.ps1 '{""type"": ""help""}'"
+    Write-Host "  .\unity-cmd.ps1 -File request.json"
+    Write-Host "  .\unity-cmd.ps1 -f complex-batch.json -Timeout 120"
+    exit 1
+}
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $requestFile = Join-Path $projectRoot "Assets\LLM\Bridge\request.json"

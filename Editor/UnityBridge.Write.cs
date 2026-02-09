@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -598,7 +600,7 @@ namespace Editor
                             }
                             else
                             {
-                                var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(refPath);
+                                var asset = ResolveAssetForProperty(prop, refPath);
                                 if (asset == null)
                                     return $"Error: Object not found at `{refPath}`";
                                 prop.objectReferenceValue = asset;
@@ -606,7 +608,7 @@ namespace Editor
                         }
                         else if (refStr.StartsWith("Assets/"))
                         {
-                            var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(refStr);
+                            var asset = ResolveAssetForProperty(prop, refStr);
                             if (asset == null)
                                 return $"Error: Asset not found at `{refStr}`";
                             prop.objectReferenceValue = asset;
@@ -632,6 +634,32 @@ namespace Editor
             {
                 return $"Error: Failed to set property: {ex.Message}";
             }
+        }
+
+        /// <summary>
+        /// Resolves the correct asset for a SerializedProperty, handling sub-asset lookup.
+        /// E.g., if the property expects a Sprite but LoadAssetAtPath returns a Texture2D,
+        /// this will search sub-assets for a matching Sprite.
+        /// </summary>
+        private static UnityEngine.Object ResolveAssetForProperty(SerializedProperty prop, string assetPath)
+        {
+            var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(assetPath);
+            if (asset == null) return null;
+
+            // Parse expected type from property.type (format: "PPtr<$TypeName>")
+            var match = Regex.Match(prop.type, @"PPtr<\$(.+)>");
+            if (!match.Success) return asset;
+
+            var expectedTypeName = match.Groups[1].Value;
+
+            // If the loaded asset already matches the expected type, return it
+            if (asset.GetType().Name == expectedTypeName) return asset;
+
+            // The loaded asset type doesn't match — look for a sub-asset of the expected type
+            var allAssets = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+            var subAsset = allAssets.FirstOrDefault(a => a.GetType().Name == expectedTypeName);
+
+            return subAsset ?? asset; // Fall back to original if no sub-asset found
         }
 
         private static string SetArrayPropertyValue(SerializedProperty arrayProp, JArray values)
