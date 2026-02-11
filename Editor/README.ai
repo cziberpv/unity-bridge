@@ -46,6 +46,44 @@ The `help` command returns the full command reference with parameters, lens syst
 
 **Property names** — use `m_` prefix for Unity internals (`m_LocalPosition`, `m_SizeDelta`). Short component names work (`Image`, not `UnityEngine.UI.Image`).
 
+## Gotchas
+
+**ParticleSystem auto-play** вЂ” `AddComponent<ParticleSystem>()` immediately starts emitting. Stop it before configuring, then restart manually:
+
+```csharp
+var ps = go.AddComponent<ParticleSystem>();
+ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+// configure modules here...
+ps.Play();
+```
+
+## Scratch Patterns
+
+Scratch scripts often run multiple times during development. Write them idempotent вЂ” safe to re-run without duplicating or breaking state.
+
+**Tags** вЂ” `AddTag` throws if the tag exists. Catch and move on:
+
+```csharp
+try { InternalEditorUtility.AddTag("MyTag"); } catch { }
+```
+
+**Assets** вЂ” check before creating, load if already there:
+
+```csharp
+if (!File.Exists("Assets/MyAsset.asset"))
+    AssetDatabase.CreateAsset(obj, "Assets/MyAsset.asset");
+else
+    obj = AssetDatabase.LoadAssetAtPath<T>("Assets/MyAsset.asset");
+```
+
+**Scene cleanup** вЂ” cache the name before destroying (the object is gone after `DestroyImmediate`):
+
+```csharp
+string name = obj.name;
+DestroyImmediate(obj);
+log.AppendLine("Deleted: " + name);
+```
+
 ## Dependencies
 
 - `com.unity.nuget.newtonsoft-json`

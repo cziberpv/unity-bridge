@@ -26,6 +26,11 @@ namespace Editor
                        "    public static string Run()\n    {\n" +
                        "        return \"hello\";\n    }\n}\n```";
             }
+            catch (TargetInvocationException ex)
+            {
+                var inner = ex.InnerException ?? ex;
+                return $"EXCEPTION: {inner.GetType().Name}: {inner.Message}\n{inner.StackTrace}";
+            }
             catch (Exception ex)
             {
                 return $"EXCEPTION: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}";
