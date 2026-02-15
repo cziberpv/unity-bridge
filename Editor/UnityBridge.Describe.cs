@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using Newtonsoft.Json.Linq;
@@ -24,6 +25,25 @@ namespace Editor
         /// Used by HandleDescribeDelta to return only changed widgets.
         /// </summary>
         private static Dictionary<string, string> _describeCache = new();
+
+        #endregion
+
+        #region Game Step State
+
+        /// <summary>
+        /// True while game-step is running (timeScale != 0, waiting for duration to elapse).
+        /// Resets to false on domain reload — acceptable, response is lost but Bridge won't hang.
+        /// </summary>
+        private static bool _gameStepPending = false;
+
+        /// <summary>EditorApplication.timeSinceStartup when game-step started (real time, unaffected by timeScale).</summary>
+        private static double _gameStepStartTime;
+
+        /// <summary>How long to let the game run, in milliseconds.</summary>
+        private static int _gameStepDurationMs;
+
+        /// <summary>What timeScale to use during the step (default 1).</summary>
+        private static float _gameStepTargetTimeScale = 1f;
 
         #endregion
 
@@ -192,21 +212,70 @@ namespace Editor
             if (!EditorApplication.isPlaying)
                 return "Error: game-step requires Play Mode.";
 
-            // Auto-pause if not paused (step without pause makes no sense)
-            if (!EditorApplication.isPaused)
-                EditorApplication.isPaused = true;
+            if (_gameStepPending)
+                return "Error: game-step already in progress. Wait for it to complete.";
 
-            var frames = request.frames > 0 ? request.frames : 1;
+            var ms = request.ms > 0 ? request.ms : 500;
+            var speed = request.speed > 0 ? request.speed : 1f;
 
-            for (int i = 0; i < frames; i++)
-                EditorApplication.Step();
+            // Set timeScale to let the game run
+            _gameStepTargetTimeScale = speed;
+            Time.timeScale = speed;
 
-            var sb = new StringBuilder();
-            sb.AppendLine($"**Stepped:** {frames} frame(s)");
-            sb.AppendLine();
-            sb.Append(HandleDescribeDelta());
+            // Record start in real time (unaffected by timeScale)
+            _gameStepStartTime = EditorApplication.timeSinceStartup;
+            _gameStepDurationMs = ms;
+            _gameStepPending = true;
 
-            return sb.ToString();
+            Debug.Log($"[UnityBridge] game-step: running {ms}ms at timeScale={speed}");
+
+            return null; // Response written by GameStepUpdate when duration elapses
+        }
+
+        /// <summary>
+        /// Called from main update loop. Checks if game-step duration has elapsed,
+        /// then pauses (timeScale=0) and writes the describe response.
+        /// </summary>
+        private static void GameStepUpdate()
+        {
+            if (!_gameStepPending)
+                return;
+
+            // Edge case: game exited Play Mode while step was running
+            if (!EditorApplication.isPlaying)
+            {
+                _gameStepPending = false;
+                var sb = new StringBuilder();
+                sb.AppendLine("<!-- Request: game-step -->");
+                sb.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
+                sb.AppendLine();
+                sb.AppendLine("Error: Play Mode exited during game-step.");
+                File.WriteAllText(ResponseFile, sb.ToString());
+                Debug.LogWarning("[UnityBridge] game-step cancelled: Play Mode exited");
+                return;
+            }
+
+            // Check elapsed real time
+            var elapsedMs = (EditorApplication.timeSinceStartup - _gameStepStartTime) * 1000.0;
+            if (elapsedMs < _gameStepDurationMs)
+                return;
+
+            // Duration elapsed — pause and respond
+            Time.timeScale = 0f;
+            _gameStepPending = false;
+
+            Debug.Log($"[UnityBridge] game-step complete: {elapsedMs:F0}ms elapsed, paused");
+
+            // Build response: describe delta (or full if cache empty)
+            var response = new StringBuilder();
+            response.AppendLine("<!-- Request: game-step -->");
+            response.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
+            response.AppendLine();
+            response.AppendLine($"**Stepped:** {_gameStepDurationMs}ms (timeScale={_gameStepTargetTimeScale})");
+            response.AppendLine();
+            response.Append(HandleDescribeDelta());
+
+            File.WriteAllText(ResponseFile, response.ToString());
         }
 
         private static string HandleTimeScale(BridgeRequest request)

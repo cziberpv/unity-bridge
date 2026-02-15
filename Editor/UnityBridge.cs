@@ -120,6 +120,11 @@ namespace Editor
                 File.WriteAllText(RequestFile, "{}");
             }
 
+            // Ensure game continues running when Editor loses focus.
+            // Critical for game-step timing — without this, Play Mode stalls
+            // when the user switches to another window.
+            Application.runInBackground = true;
+
             // Poll for changes (works even when Unity not focused)
             EditorApplication.update += PollForRequest;
 
@@ -133,6 +138,9 @@ namespace Editor
 
         private static void PollForRequest()
         {
+            // Async operations that need per-frame checks (before poll interval gate)
+            GameStepUpdate();
+
             // Check every PollIntervalSeconds
             var now = DateTime.Now;
             if ((now - _lastRequestCheck).TotalSeconds < PollIntervalSeconds)
@@ -386,7 +394,7 @@ namespace Editor
                 HandleDescribe),
             new("interact", "path", "Invoke action by semantic path (e.g. /Dock/Ship/Slot[1,0]/Unequip)", "AI Play",
                 HandleInteract),
-            new("game-step", "frames", "Advance N frames while paused (default 1), return describe. Large N (1000+) may not fully simulate physics/render per step", "AI Play",
+            new("game-step", "ms, speed", "Let game run for ms milliseconds (default 500) at timeScale=speed (default 1), then pause and return describe delta", "AI Play",
                 HandleGameStep),
             new("time-scale", "value", "Get/set Time.timeScale (0.5 = half speed, 2 = double)", "AI Play",
                 HandleTimeScale),
@@ -441,7 +449,9 @@ namespace Editor
             public float delay;           // Seconds to wait before capture (default 1)
 
             // AI Play options
-            public int frames;            // game-step: frames to advance (default 1)
+            public int frames;            // game-step: legacy, kept for backward compat
+            public int ms;                // game-step: milliseconds to run (default 500)
+            public float speed;           // game-step: timeScale during step (default 1)
 
             // Scene operations
             public bool force;            // For new-scene/open-scene: discard unsaved changes without asking

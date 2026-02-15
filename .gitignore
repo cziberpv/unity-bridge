@@ -1,10 +1,20 @@
 # Local AI agent workspace (not shipped with the package)
 .claude/
 /CLAUDE.md
+/CLAUDE.md.meta
 /Memory.md
+/Memory.md.meta
 /Assets/
+/Assets.meta
 /docs/
+/docs.meta
 /prototype/
+/prototype.meta
+/Logs/
+/Logs.meta
+/Packages/
+/ProjectSettings/
+/UserSettings/
 
 # Unity generated
 [Ll]ibrary/
