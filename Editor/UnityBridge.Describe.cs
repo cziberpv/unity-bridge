@@ -17,6 +17,91 @@ namespace Editor
     /// </summary>
     public static partial class UnityBridge
     {
+        #region Play Mode State
+
+        // EditorPrefs keys for play command (survive domain reload)
+        private const string PrefKeyPlayPending = "UnityBridge.PlayPending";
+        private const string PrefKeyPlaySpeed = "UnityBridge.PlaySpeed";
+
+        /// <summary>
+        /// Called from Initialize (via partial method) to check if a play command
+        /// is pending after domain reload, and to subscribe to playModeStateChanged.
+        /// </summary>
+        static partial void InitializePlay()
+        {
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+        }
+
+        private static void OnPlayModeStateChanged(PlayModeStateChange state)
+        {
+            if (state != PlayModeStateChange.EnteredPlayMode) return;
+            if (!EditorPrefs.GetBool(PrefKeyPlayPending, false)) return;
+
+            // Play command was pending — apply timeScale and write response
+            var speed = EditorPrefs.GetFloat(PrefKeyPlaySpeed, 1f);
+
+            // Clear prefs before writing response
+            EditorPrefs.DeleteKey(PrefKeyPlayPending);
+            EditorPrefs.DeleteKey(PrefKeyPlaySpeed);
+
+            Time.timeScale = speed;
+            Debug.Log($"[UnityBridge] Play Mode started, timeScale={speed}");
+
+            // Write response: confirmation + full describe
+            var sb = new StringBuilder();
+            sb.AppendLine("<!-- Request: play -->");
+            sb.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
+            sb.AppendLine();
+            sb.AppendLine($"**Play Mode started** at timeScale={speed}");
+            if (speed == 0f)
+                sb.AppendLine("\n> **Paused.** Use `game-step` to advance or `time-scale` to set speed.");
+            sb.AppendLine();
+            sb.Append(HandleDescribeFull(null));
+
+            File.WriteAllText(ResponseFile, sb.ToString());
+        }
+
+        private static string HandlePlay(BridgeRequest request)
+        {
+            // speed is required — no default. -1 means not provided.
+            if (request.speed < 0f)
+                return "Error: `speed` is required. Example: `{\"type\": \"play\", \"speed\": 1}`\nUse speed=0 to start paused.";
+
+            var speed = request.speed;
+
+            if (EditorApplication.isPlaying)
+            {
+                // Already in Play Mode — just set timeScale
+                Time.timeScale = speed;
+                var pause = speed == 0f ? "\n> **Paused.** Use `game-step` to advance or `time-scale` to set speed.\n" : "";
+                return $"**timeScale={speed}**\n{pause}\n" + HandleDescribeFull(null);
+            }
+
+            // Guard: dirty scene triggers modal dialog
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            if (scene.isDirty)
+                return "Error: Scene has unsaved changes. Use `save-scene` first — entering Play Mode with a dirty scene triggers a modal dialog that freezes the Bridge.";
+
+            // Store in EditorPrefs and enter Play Mode (domain reload will follow)
+            EditorPrefs.SetBool(PrefKeyPlayPending, true);
+            EditorPrefs.SetFloat(PrefKeyPlaySpeed, speed);
+            EditorApplication.isPlaying = true;
+
+            Debug.Log($"[UnityBridge] play: entering Play Mode at speed={speed}");
+            return null; // Response written by OnPlayModeStateChanged after domain reload
+        }
+
+        private static string HandleStop(BridgeRequest request)
+        {
+            if (!EditorApplication.isPlaying)
+                return "Not in Play Mode.";
+
+            EditorApplication.isPlaying = false;
+            return "**Exiting Play Mode...**";
+        }
+
+        #endregion
+
         #region Delta Cache
 
         /// <summary>
@@ -88,6 +173,12 @@ namespace Editor
             }
 
             _describeCache = newCache;
+
+            // Collect and append events (describe clears events as side effect)
+            var events = CollectEvents();
+            if (!string.IsNullOrEmpty(events))
+                sb.Append(events);
+
             return sb.ToString();
         }
 
@@ -193,7 +284,7 @@ namespace Editor
                 return $"Error executing `{actionId}`: {ex.Message}";
             }
 
-            // Return result + delta describe (interaction changes may ripple across the whole screen)
+            // Return result + events + delta describe (interaction changes may ripple across the whole screen)
             var sb = new StringBuilder();
 
             if (!string.IsNullOrEmpty(result))
@@ -201,6 +292,10 @@ namespace Editor
                 sb.AppendLine($"**Result:** {result}");
                 sb.AppendLine();
             }
+
+            var events = CollectEvents();
+            if (!string.IsNullOrEmpty(events))
+                sb.Append(events);
 
             sb.Append(HandleDescribeDelta());
 
@@ -216,7 +311,7 @@ namespace Editor
                 return "Error: game-step already in progress. Wait for it to complete.";
 
             var ms = request.ms > 0 ? request.ms : 500;
-            var speed = request.speed > 0 ? request.speed : 1f;
+            var speed = request.speed >= 0 ? request.speed : 1f;
 
             // Set timeScale to let the game run
             _gameStepTargetTimeScale = speed;
@@ -266,13 +361,18 @@ namespace Editor
 
             Debug.Log($"[UnityBridge] game-step complete: {elapsedMs:F0}ms elapsed, paused");
 
-            // Build response: describe delta (or full if cache empty)
+            // Build response: events + describe delta (or full if cache empty)
             var response = new StringBuilder();
             response.AppendLine("<!-- Request: game-step -->");
             response.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
             response.AppendLine();
             response.AppendLine($"**Stepped:** {_gameStepDurationMs}ms (timeScale={_gameStepTargetTimeScale})");
             response.AppendLine();
+
+            var events = CollectEvents();
+            if (!string.IsNullOrEmpty(events))
+                response.Append(events);
+
             response.Append(HandleDescribeDelta());
 
             File.WriteAllText(ResponseFile, response.ToString());
@@ -293,6 +393,42 @@ namespace Editor
 
             Time.timeScale = scale;
             return $"**Time.timeScale:** {Time.timeScale}";
+        }
+
+        #endregion
+
+        #region Event Collection
+
+        /// <summary>
+        /// Collects events from all IDescribable widgets. Events are cleared on read (GetEvents contract).
+        /// Returns formatted markdown string, or empty string if no events.
+        /// </summary>
+        private static string CollectEvents()
+        {
+            var describables = FindDescribables(null);
+            if (describables.Count == 0) return "";
+
+            var sb = new StringBuilder();
+
+            foreach (var (go, describable) in describables)
+            {
+                var events = describable.GetEvents();
+                if (events == null || events.Count == 0) continue;
+
+                var widgetName = go.name;
+                foreach (var evt in events)
+                {
+                    sb.AppendLine($"- **{widgetName}**: {evt}");
+                }
+            }
+
+            if (sb.Length == 0) return "";
+
+            var result = new StringBuilder();
+            result.AppendLine("## Events");
+            result.Append(sb);
+            result.AppendLine();
+            return result.ToString();
         }
 
         #endregion
@@ -509,6 +645,12 @@ namespace Editor
         /// Called every time the agent requests "describe". Must be stateless and cheap.
         /// </summary>
         ScreenFragment Describe();
+
+        /// <summary>
+        /// Returns accumulated events since last call. Events are cleared after reading.
+        /// Return null or empty list if no events.
+        /// </summary>
+        List<string> GetEvents() => null;
     }
 
     /// <summary>

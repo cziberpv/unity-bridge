@@ -59,11 +59,15 @@ namespace Editor
             Initialize();
             SetupCompilationTracking();
             InitializeScreenshot();
+            InitializePlay();
             EditorApplication.quitting += Cleanup;
         }
 
         // Partial method for screenshot initialization (implemented in UnityBridge.Screenshot.cs)
         static partial void InitializeScreenshot();
+
+        // Partial method for play command initialization (implemented in UnityBridge.Describe.cs)
+        static partial void InitializePlay();
 
         private static void SetupCompilationTracking()
         {
@@ -396,6 +400,10 @@ namespace Editor
                 HandleInteract),
             new("game-step", "ms, speed", "Let game run for ms milliseconds (default 500) at timeScale=speed (default 1), then pause and return describe delta", "AI Play",
                 HandleGameStep),
+            new("play", "speed (required)", "Enter Play Mode at timeScale=speed", "AI Play",
+                HandlePlay),
+            new("stop", "-", "Exit Play Mode", "AI Play",
+                HandleStop),
             new("time-scale", "value", "Get/set Time.timeScale (0.5 = half speed, 2 = double)", "AI Play",
                 HandleTimeScale),
 
@@ -451,7 +459,7 @@ namespace Editor
             // AI Play options
             public int frames;            // game-step: legacy, kept for backward compat
             public int ms;                // game-step: milliseconds to run (default 500)
-            public float speed;           // game-step: timeScale during step (default 1)
+            public float speed = -1f;     // game-step/play: timeScale (-1 = not provided)
 
             // Scene operations
             public bool force;            // For new-scene/open-scene: discard unsaved changes without asking
