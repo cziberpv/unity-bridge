@@ -338,6 +338,7 @@ namespace Editor
     /// <summary>
     /// Implement on MonoBehaviour to make a widget visible to AI agents via "describe" command.
     /// The widget knows its own name and structure, but NOT its full path — the Bridge builds paths during traversal.
+    /// See IDescribable.md for cookbook and best practices.
     /// </summary>
     public interface IDescribable
     {
