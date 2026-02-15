@@ -234,23 +234,12 @@ namespace Editor
             if (File.Exists(path))
                 return $"Error: Scene already exists at `{path}`. Use `open-scene` to open it.";
 
-            // Handle dirty scene
+            // Guard: dirty scene would trigger a modal dialog that freezes the Bridge
             var currentScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
-            if (currentScene.isDirty)
-            {
-                if (request.force)
-                {
-                    // Force: discard changes without asking
-                }
-                else
-                {
-                    var saved = UnityEditor.SceneManagement.EditorSceneManager.SaveModifiedScenesIfUserWantsTo(new[] { currentScene });
-                    if (!saved)
-                        return "Error: User cancelled save dialog. Scene not created. Use \"force\": true to discard changes.";
-                }
-            }
+            if (currentScene.isDirty && !request.force)
+                return "Error: Scene has unsaved changes. Use `save-scene` first or pass `force: true` to discard.";
 
-            // Create new scene
+            // Create new scene (NewScene with Single mode replaces current scene without dialog)
             var newScene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(
                 UnityEditor.SceneManagement.NewSceneSetup.DefaultGameObjects,
                 UnityEditor.SceneManagement.NewSceneMode.Single);
@@ -280,23 +269,12 @@ namespace Editor
             if (!File.Exists(path))
                 return $"Error: Scene not found at `{path}`. Use `new-scene` to create it.";
 
-            // Handle dirty scene
+            // Guard: dirty scene would trigger a modal dialog that freezes the Bridge
             var currentScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
-            if (currentScene.isDirty)
-            {
-                if (request.force)
-                {
-                    // Force: discard changes without asking
-                }
-                else
-                {
-                    var saved = UnityEditor.SceneManagement.EditorSceneManager.SaveModifiedScenesIfUserWantsTo(new[] { currentScene });
-                    if (!saved)
-                        return "Error: User cancelled save dialog. Scene not opened. Use \"force\": true to discard changes.";
-                }
-            }
+            if (currentScene.isDirty && !request.force)
+                return "Error: Scene has unsaved changes. Use `save-scene` first or pass `force: true` to discard.";
 
-            // Open the scene
+            // Open the scene (OpenScene with Single mode replaces current scene without dialog)
             var openedScene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene(path, UnityEditor.SceneManagement.OpenSceneMode.Single);
 
             if (!openedScene.IsValid())

@@ -62,6 +62,14 @@ namespace Editor
 
         private static string HandleScreenshotRequest(BridgeRequest request)
         {
+            // Guard: entering Play Mode with dirty scene triggers a modal "Save?" dialog that freezes the Bridge
+            if (!EditorApplication.isPlaying)
+            {
+                var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+                if (scene.isDirty)
+                    return "Error: Scene has unsaved changes. Use `save-scene` first — entering Play Mode with a dirty scene triggers a modal dialog that freezes the Bridge.";
+            }
+
             float delay = request.delay > 0 ? request.delay : 1f;
             bool alreadyPlaying = EditorApplication.isPlaying;
 
