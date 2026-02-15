@@ -46,6 +46,35 @@ The `help` command returns the full command reference with parameters, lens syst
 
 **Property names** — use `m_` prefix for Unity internals (`m_LocalPosition`, `m_SizeDelta`). Short component names work (`Image`, not `UnityEngine.UI.Image`).
 
+## AI Play
+
+Semantic UI for agents playing the game, not just editing it. Widgets implementing `IDescribable` expose their state and actions as text — the agent sees the world, not component data.
+
+```powershell
+# Read semantic UI (all IDescribable widgets in scene)
+.\unity-cmd.ps1 '{"type": "describe"}'
+
+# Read specific subtree
+.\unity-cmd.ps1 '{"type": "describe", "path": "Dock/Ship"}'
+
+# Interact via semantic path
+.\unity-cmd.ps1 '{"type": "interact", "path": "/Dock/Ship/Slot[1,1]/Equip"}'
+
+# Advance N frames in paused Play Mode (returns delta)
+.\unity-cmd.ps1 '{"type": "game-step", "frames": 10}'
+
+# Set time scale (0.5 = half speed, 2 = double)
+.\unity-cmd.ps1 '{"type": "time-scale", "value": 0.5}'
+```
+
+**Delta caching** — `interact` and `game-step` return only changed widgets (marked `~`), new widgets (`+`), and removed widgets (`-`). First call after domain reload returns full state.
+
+**Semantic paths** — read like narrative: `/Dock/Ship/Slot[1,1]/Equip` = "at the dock, on the ship, in slot 1,1, equipping something". Widget names are world names ("Treasure Chest"), action IDs are verbs ("Open", "Pull").
+
+**Game-step note** — currently being redesigned. Millisecond-based approach planned instead of frame-based.
+
+See `IDescribable.md` for widget authoring patterns, text quality guidelines, and design philosophy.
+
 ## Gotchas
 
 **ParticleSystem auto-play** вЂ” `AddComponent<ParticleSystem>()` immediately starts emitting. Stop it before configuring, then restart manually:
