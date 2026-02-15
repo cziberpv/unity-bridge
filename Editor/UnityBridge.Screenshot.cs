@@ -28,6 +28,7 @@ namespace Editor
         private const string PrefKeyScreenshotStartTime = "UnityBridge.Screenshot.StartTime";
         private const string PrefKeyScreenshotPath = "UnityBridge.Screenshot.Path";
         private const string PrefKeyScreenshotCaptured = "UnityBridge.Screenshot.Captured";
+        private const string PrefKeyScreenshotWasPlaying = "UnityBridge.Screenshot.WasPlaying";
 
         private static bool _screenshotSubscribed;
         private static bool _screenshotErrorsSubscribed;
@@ -62,6 +63,7 @@ namespace Editor
         private static string HandleScreenshotRequest(BridgeRequest request)
         {
             float delay = request.delay > 0 ? request.delay : 1f;
+            bool alreadyPlaying = EditorApplication.isPlaying;
 
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
             var filename = $"screenshot_{timestamp}.png";
@@ -72,7 +74,8 @@ namespace Editor
             // Save state to EditorPrefs (survives domain reload)
             EditorPrefs.SetBool(PrefKeyScreenshotPending, true);
             EditorPrefs.SetBool(PrefKeyScreenshotCaptured, false);
-            EditorPrefs.SetFloat(PrefKeyScreenshotDelay, delay);
+            EditorPrefs.SetBool(PrefKeyScreenshotWasPlaying, alreadyPlaying);
+            EditorPrefs.SetFloat(PrefKeyScreenshotDelay, alreadyPlaying ? 0.1f : delay);
             EditorPrefs.SetString(PrefKeyScreenshotStartTime, DateTime.Now.ToString("O"));
             EditorPrefs.SetString(PrefKeyScreenshotPath, fullPath);
 
@@ -80,8 +83,15 @@ namespace Editor
             SubscribeToRuntimeErrors();
             SubscribeToScreenshotUpdate();
 
-            Debug.Log($"[UnityBridge] Screenshot: entering Play Mode, delay={delay}s, output={fullPath}");
-            EditorApplication.isPlaying = true;
+            if (alreadyPlaying)
+            {
+                Debug.Log($"[UnityBridge] Screenshot: already in Play Mode, capturing to {fullPath}");
+            }
+            else
+            {
+                Debug.Log($"[UnityBridge] Screenshot: entering Play Mode, delay={delay}s, output={fullPath}");
+                EditorApplication.isPlaying = true;
+            }
 
             return null; // Response written by ScreenshotUpdate after capture
         }
@@ -144,10 +154,11 @@ namespace Editor
             {
                 Debug.LogError($"[UnityBridge] Screenshot safety timeout after {elapsed:F0}s — forcing exit from Play Mode");
                 var path = EditorPrefs.GetString(PrefKeyScreenshotPath, "");
+                bool wasPlaying = EditorPrefs.GetBool(PrefKeyScreenshotWasPlaying, false);
                 WriteScreenshotResponse(path, false,
                     $"Safety timeout: Play Mode exceeded {delay + ScreenshotSafetyMargin:F0}s limit",
                     _screenshotRuntimeErrors);
-                if (EditorApplication.isPlaying)
+                if (!wasPlaying && EditorApplication.isPlaying)
                     EditorApplication.isPlaying = false;
                 ClearScreenshotState();
                 return;
@@ -179,6 +190,7 @@ namespace Editor
             try
             {
                 ScreenCapture.CaptureScreenshot(capturePath);
+                bool wasPlaying = EditorPrefs.GetBool(PrefKeyScreenshotWasPlaying, false);
 
                 // Wait frames for screenshot file to be written, then exit Play Mode
                 EditorApplication.delayCall += () =>
@@ -186,7 +198,8 @@ namespace Editor
                     EditorApplication.delayCall += () =>
                     {
                         WriteScreenshotResponse(capturePath, true, null, _screenshotRuntimeErrors);
-                        EditorApplication.isPlaying = false;
+                        if (!wasPlaying)
+                            EditorApplication.isPlaying = false;
                         ClearScreenshotState();
                     };
                 };
@@ -194,8 +207,10 @@ namespace Editor
             catch (Exception ex)
             {
                 Debug.LogError($"[UnityBridge] Screenshot failed: {ex.Message}");
+                bool wasPlaying = EditorPrefs.GetBool(PrefKeyScreenshotWasPlaying, false);
                 WriteScreenshotResponse(capturePath, false, ex.Message, _screenshotRuntimeErrors);
-                EditorApplication.isPlaying = false;
+                if (!wasPlaying)
+                    EditorApplication.isPlaying = false;
                 ClearScreenshotState();
             }
         }
@@ -207,6 +222,7 @@ namespace Editor
             EditorPrefs.DeleteKey(PrefKeyScreenshotStartTime);
             EditorPrefs.DeleteKey(PrefKeyScreenshotPath);
             EditorPrefs.DeleteKey(PrefKeyScreenshotCaptured);
+            EditorPrefs.DeleteKey(PrefKeyScreenshotWasPlaying);
             UnsubscribeFromScreenshotUpdate();
             UnsubscribeFromRuntimeErrors();
             _screenshotRuntimeErrors.Clear();

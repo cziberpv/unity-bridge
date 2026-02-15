@@ -381,6 +381,16 @@ namespace Editor
             new("scratch", "-", "Run one-off C# from UnityBridge.Scratch.cs", "Advanced",
                 _ => HandleScratch()),
 
+            // AI Play
+            new("describe", "path", "Describe IDescribable widgets in scene (semantic UI for agents)", "AI Play",
+                HandleDescribe),
+            new("interact", "path", "Invoke action by semantic path (e.g. /Dock/Ship/Slot[1,0]/Unequip)", "AI Play",
+                HandleInteract),
+            new("game-step", "frames", "Advance N frames while paused (default 1), return describe. Large N (1000+) may not fully simulate physics/render per step", "AI Play",
+                HandleGameStep),
+            new("time-scale", "value", "Get/set Time.timeScale (0.5 = half speed, 2 = double)", "AI Play",
+                HandleTimeScale),
+
             // Texture (experimental)
             new("texture-scan", "path", "Scan folder, build texture catalog", "Texture (Experimental)",
                 HandleTextureScan),
@@ -429,6 +439,9 @@ namespace Editor
 
             // Screenshot options
             public float delay;           // Seconds to wait before capture (default 1)
+
+            // AI Play options
+            public int frames;            // game-step: frames to advance (default 1)
 
             // Scene operations
             public bool force;            // For new-scene/open-scene: discard unsaved changes without asking
