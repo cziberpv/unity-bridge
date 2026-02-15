@@ -216,7 +216,9 @@ namespace Editor
                     var actionLine = $"{prefix}  [interact] {actionPath}";
 
                     if (!action.Enabled)
-                        actionLine += $" — disabled: \"{action.DisabledReason ?? "unavailable"}\"";
+                        actionLine += string.IsNullOrEmpty(action.DisabledReason)
+                            ? " — disabled"
+                            : $" — disabled: \"{action.DisabledReason}\"";
                     else if (!string.IsNullOrEmpty(action.Hint))
                         actionLine += $" — \"{action.Hint}\"";
 
