@@ -175,16 +175,18 @@ namespace Editor
                 }
                 else
                 {
-                    var request = JsonConvert.DeserializeObject<BridgeRequest>(json);
+                    var jObj = JObject.Parse(json);
+                    var request = jObj.ToObject<BridgeRequest>();
                     if (string.IsNullOrEmpty(request.type))
                         return;
 
                     Debug.Log($"[UnityBridge] Processing request: {request.type} {request.path ?? request.query}");
 
+                    var warning = ValidateFields(jObj, request.type);
                     var response = HandleRequest(request);
                     // Some handlers write response directly (e.g., errors during compilation)
                     if (response != null)
-                        WriteResponse(request, response);
+                        WriteResponse(request, warning != null ? warning + response : response);
                 }
 
                 // Clear request file
@@ -201,17 +203,47 @@ namespace Editor
         {
             Debug.Log("[UnityBridge] Processing batch request");
 
-            // Parse JSON array manually (JsonUtility doesn't support arrays at root)
-            var requests = ParseBatchRequests(json);
-            if (requests == null || requests.Count == 0)
+            // Parse JSON array for both deserialization and field validation
+            JArray jArray;
+            List<BridgeRequest> requests;
+            try
+            {
+                jArray = JArray.Parse(json);
+                requests = jArray
+                    .OfType<JObject>()
+                    .Select(o => o.ToObject<BridgeRequest>())
+                    .Where(r => !string.IsNullOrEmpty(r?.type))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[UnityBridge] Failed to parse batch request: {ex.Message}");
+                requests = new List<BridgeRequest>();
+                jArray = null;
+            }
+
+            if (requests.Count == 0)
             {
                 WriteError("Failed to parse batch request. Ensure it's a valid JSON array.");
                 return;
             }
 
+            // Collect field warnings per batch item
+            var warnings = new List<string>();
+            var jObjects = jArray?.OfType<JObject>()
+                .Where(o => !string.IsNullOrEmpty(o["type"]?.ToString()))
+                .ToList();
+
             var results = new List<(string type, bool success, string message)>();
-            foreach (var request in requests)
+            for (int i = 0; i < requests.Count; i++)
             {
+                var request = requests[i];
+                if (jObjects != null && i < jObjects.Count)
+                {
+                    var w = ValidateFields(jObjects[i], request.type);
+                    if (w != null) warnings.Add($"[{i + 1}] {request.type}: {w.Trim()}");
+                }
+
                 try
                 {
                     var response = HandleRequest(request);
@@ -224,25 +256,11 @@ namespace Editor
                 }
             }
 
-            WriteBatchResponse(results);
+            WriteBatchResponse(results, warnings);
         }
 
-        private static List<BridgeRequest> ParseBatchRequests(string json)
-        {
-            try
-            {
-                return JsonConvert.DeserializeObject<List<BridgeRequest>>(json)
-                    ?.Where(r => !string.IsNullOrEmpty(r?.type))
-                    .ToList() ?? new List<BridgeRequest>();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[UnityBridge] Failed to parse batch request: {ex.Message}");
-                return new List<BridgeRequest>();
-            }
-        }
-
-        private static void WriteBatchResponse(List<(string type, bool success, string message)> results)
+        private static void WriteBatchResponse(List<(string type, bool success, string message)> results,
+            List<string> warnings = null)
         {
             var sb = new StringBuilder();
             var succeeded = 0;
@@ -251,6 +269,13 @@ namespace Editor
 
             sb.AppendLine($"# Batch: {succeeded}/{results.Count} succeeded");
             sb.AppendLine();
+
+            if (warnings != null && warnings.Count > 0)
+            {
+                foreach (var w in warnings)
+                    sb.AppendLine(w);
+                sb.AppendLine();
+            }
 
             for (int i = 0; i < results.Count; i++)
             {
@@ -424,6 +449,41 @@ namespace Editor
 
         private static Dictionary<string, CommandInfo> CommandMap =>
             _commandMap ??= Commands.ToDictionary(c => c.Type);
+
+        #endregion
+
+        #region Field Validation
+
+        // Known BridgeRequest field names — for detecting typos in agent requests
+        private static readonly HashSet<string> KnownFields = new()
+        {
+            "type", "path", "component", "property", "value", "properties",
+            "prefab", "parent", "components", "depth", "detail", "lens", "contrast",
+            "delay", "frames", "ms", "speed", "force", "query"
+        };
+
+        /// <summary>
+        /// Check raw JSON keys against known BridgeRequest fields.
+        /// Returns a warning string if unknown fields found, null otherwise.
+        /// </summary>
+        private static string ValidateFields(JObject jObj, string commandType)
+        {
+            var unknown = new List<string>();
+            foreach (var prop in jObj.Properties())
+            {
+                if (!KnownFields.Contains(prop.Name))
+                    unknown.Add(prop.Name);
+            }
+
+            if (unknown.Count == 0) return null;
+
+            var fieldList = string.Join("`, `", unknown);
+            var hint = "";
+            if (CommandMap.TryGetValue(commandType?.ToLower() ?? "", out var cmd) && cmd.Fields != "-")
+                hint = $" Known fields for `{commandType}`: `{cmd.Fields}`.";
+
+            return $"> **Warning:** Unknown field(s): `{fieldList}`.{hint}\n\n";
+        }
 
         #endregion
 
