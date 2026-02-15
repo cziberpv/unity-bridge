@@ -89,7 +89,7 @@ namespace Editor
                 sb.AppendLine();
             }
 
-            sb.Append(HandleDescribe(request));
+            sb.Append(HandleDescribe(new BridgeRequest { type = "describe" }));
 
             return sb.ToString();
         }
@@ -111,7 +111,7 @@ namespace Editor
             var sb = new StringBuilder();
             sb.AppendLine($"**Stepped:** {frames} frame(s)");
             sb.AppendLine();
-            sb.Append(HandleDescribe(request));
+            sb.Append(HandleDescribe(new BridgeRequest { type = "describe" }));
 
             return sb.ToString();
         }
