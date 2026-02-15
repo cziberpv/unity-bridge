@@ -16,17 +16,34 @@ namespace Editor
     /// </summary>
     public static partial class UnityBridge
     {
+        #region Delta Cache
+
+        /// <summary>
+        /// Per-widget render cache keyed by semantic path.
+        /// Survives between commands, reset on domain reload (static field).
+        /// Used by HandleDescribeDelta to return only changed widgets.
+        /// </summary>
+        private static Dictionary<string, string> _describeCache = new();
+
+        #endregion
+
         #region Describe Command Handlers
 
         private static string HandleDescribe(BridgeRequest request)
         {
-            var root = request.path;
+            return HandleDescribeFull(request.path);
+        }
 
-            // Collect all IDescribable in scene
+        /// <summary>
+        /// Full describe: renders all widgets, updates cache. Always returns complete output.
+        /// </summary>
+        private static string HandleDescribeFull(string root)
+        {
             var describables = FindDescribables(root);
 
             if (describables.Count == 0)
             {
+                _describeCache.Clear();
                 if (!string.IsNullOrEmpty(root))
                     return $"No IDescribable found at `{root}` or its children.";
                 return "No IDescribable found in scene.\n\nWidgets must implement `IDescribable` to appear here.";
@@ -36,14 +53,90 @@ namespace Editor
             sb.AppendLine("# Screen");
             sb.AppendLine();
 
+            var newCache = new Dictionary<string, string>();
+
             foreach (var (go, describable) in describables)
             {
                 var basePath = "/" + GetFullPath(go);
                 var fragment = describable.Describe();
-                RenderFragment(sb, fragment, basePath, indent: 0);
+                var widgetSb = new StringBuilder();
+                RenderFragment(widgetSb, fragment, basePath, indent: 0);
+                var rendered = widgetSb.ToString();
+
+                newCache[basePath] = rendered;
+                sb.Append(rendered);
             }
 
+            _describeCache = newCache;
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Delta describe: renders all widgets, compares with cache, returns only changes.
+        /// Markers: ~ changed, + new, - gone. Falls back to full if cache is empty.
+        /// </summary>
+        private static string HandleDescribeDelta()
+        {
+            // Empty cache = first call after domain reload or session start — return full
+            if (_describeCache.Count == 0)
+                return HandleDescribeFull(null);
+
+            var describables = FindDescribables(null);
+
+            if (describables.Count == 0)
+            {
+                var hadWidgets = _describeCache.Count > 0;
+                _describeCache.Clear();
+                if (hadWidgets)
+                    return "All widgets gone.";
+                return "No changes.";
+            }
+
+            var newCache = new Dictionary<string, string>();
+            var delta = new StringBuilder();
+            var hasChanges = false;
+
+            // Render current widgets, compare with cache
+            foreach (var (go, describable) in describables)
+            {
+                var basePath = "/" + GetFullPath(go);
+                var fragment = describable.Describe();
+                var widgetSb = new StringBuilder();
+                RenderFragment(widgetSb, fragment, basePath, indent: 0);
+                var rendered = widgetSb.ToString();
+
+                newCache[basePath] = rendered;
+
+                if (_describeCache.TryGetValue(basePath, out var cached))
+                {
+                    // Existed before — check if changed
+                    if (rendered != cached)
+                    {
+                        delta.Append($"~ {rendered}");
+                        hasChanges = true;
+                    }
+                }
+                else
+                {
+                    // New widget
+                    delta.Append($"+ {rendered}");
+                    hasChanges = true;
+                }
+            }
+
+            // Detect gone widgets (in old cache but not in new)
+            foreach (var oldPath in _describeCache.Keys)
+            {
+                if (!newCache.ContainsKey(oldPath))
+                {
+                    delta.AppendLine($"- {oldPath} gone");
+                    hasChanges = true;
+                }
+            }
+
+            _describeCache = newCache;
+
+            return hasChanges ? delta.ToString() : "No changes.";
         }
 
         private static string HandleInteract(BridgeRequest request)
@@ -80,7 +173,7 @@ namespace Editor
                 return $"Error executing `{actionId}`: {ex.Message}";
             }
 
-            // Return result + full describe (vdoh-vydoh: interaction changes may ripple across the whole screen)
+            // Return result + delta describe (interaction changes may ripple across the whole screen)
             var sb = new StringBuilder();
 
             if (!string.IsNullOrEmpty(result))
@@ -89,7 +182,7 @@ namespace Editor
                 sb.AppendLine();
             }
 
-            sb.Append(HandleDescribe(new BridgeRequest { type = "describe" }));
+            sb.Append(HandleDescribeDelta());
 
             return sb.ToString();
         }
@@ -111,7 +204,7 @@ namespace Editor
             var sb = new StringBuilder();
             sb.AppendLine($"**Stepped:** {frames} frame(s)");
             sb.AppendLine();
-            sb.Append(HandleDescribe(new BridgeRequest { type = "describe" }));
+            sb.Append(HandleDescribeDelta());
 
             return sb.ToString();
         }
