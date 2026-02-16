@@ -57,7 +57,7 @@ namespace Editor
             sb.AppendLine();
             sb.Append(HandleDescribeFull(null));
 
-            File.WriteAllText(ResponseFile, sb.ToString());
+            File.WriteAllText(ResponseFile, sb.ToString(), Utf8Bom);
         }
 
         private static string HandlePlay(BridgeRequest request)
@@ -392,7 +392,7 @@ namespace Editor
                 sb.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
                 sb.AppendLine();
                 sb.AppendLine("Error: Play Mode exited during game-step.");
-                File.WriteAllText(ResponseFile, sb.ToString());
+                File.WriteAllText(ResponseFile, sb.ToString(), Utf8Bom);
                 Debug.LogWarning("[UnityBridge] game-step cancelled: Play Mode exited");
                 return;
             }
@@ -402,27 +402,54 @@ namespace Editor
             if (elapsedMs < _gameStepDurationMs)
                 return;
 
-            // Duration elapsed — pause and respond
-            Time.timeScale = 0f;
-            _gameStepPending = false;
+            // Duration elapsed — pause and respond.
+            // try/finally ensures _gameStepPending is cleared and timeScale is reset
+            // even if describe/events/file-write throws, so the bridge never gets stuck.
+            try
+            {
+                Time.timeScale = 0f;
 
-            Debug.Log($"[UnityBridge] game-step complete: {elapsedMs:F0}ms elapsed, paused");
+                Debug.Log($"[UnityBridge] game-step complete: {elapsedMs:F0}ms elapsed, paused");
 
-            // Build response: events + describe delta (or full if cache empty)
-            var response = new StringBuilder();
-            response.AppendLine("<!-- Request: game-step -->");
-            response.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
-            response.AppendLine();
-            response.AppendLine($"**Stepped:** {_gameStepDurationMs}ms (timeScale={_gameStepTargetTimeScale})");
-            response.AppendLine();
+                // Build response: events + describe delta (or full if cache empty)
+                var response = new StringBuilder();
+                response.AppendLine("<!-- Request: game-step -->");
+                response.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
+                response.AppendLine();
+                response.AppendLine($"**Stepped:** {_gameStepDurationMs}ms (timeScale={_gameStepTargetTimeScale})");
+                response.AppendLine();
 
-            var events = CollectEvents();
-            if (!string.IsNullOrEmpty(events))
-                response.Append(events);
+                var events = CollectEvents();
+                if (!string.IsNullOrEmpty(events))
+                    response.Append(events);
 
-            response.Append(HandleDescribeDelta());
+                response.Append(HandleDescribeDelta());
 
-            File.WriteAllText(ResponseFile, response.ToString());
+                File.WriteAllText(ResponseFile, response.ToString(), Utf8Bom);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[UnityBridge] game-step response failed: {ex}");
+                try
+                {
+                    var error = new StringBuilder();
+                    error.AppendLine("<!-- Request: game-step -->");
+                    error.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
+                    error.AppendLine();
+                    error.AppendLine($"Error during game-step response: {ex.Message}");
+                    File.WriteAllText(ResponseFile, error.ToString(), Utf8Bom);
+                }
+                catch
+                {
+                    // Last resort: if even error response write fails, just log
+                    Debug.LogError("[UnityBridge] Failed to write game-step error response");
+                }
+            }
+            finally
+            {
+                _gameStepPending = false;
+                Time.timeScale = 0f;
+            }
         }
 
         private static string HandleTimeScale(BridgeRequest request)

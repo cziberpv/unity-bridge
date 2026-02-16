@@ -27,6 +27,7 @@ namespace Editor
         private const string BridgeFolder = "Assets/LLM/Bridge";
         private const string RequestFile = "Assets/LLM/Bridge/request.json";
         private const string ResponseFile = "Assets/LLM/Bridge/response.md";
+        private static readonly Encoding Utf8Bom = new UTF8Encoding(true);
 
         private static DateTime _lastRequestCheck = DateTime.MinValue;
         private static DateTime _lastRequestModified = DateTime.MinValue;
@@ -247,8 +248,16 @@ namespace Editor
                 try
                 {
                     var response = HandleRequest(request);
-                    var isError = response.StartsWith("Error:");
-                    results.Add((request.type, !isError, response));
+                    if (response == null)
+                    {
+                        // Async command (game-step, play, screenshot) — result will be written separately
+                        results.Add((request.type, true, "Command started asynchronously, result will follow."));
+                    }
+                    else
+                    {
+                        var isError = response.StartsWith("Error:");
+                        results.Add((request.type, !isError, response));
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -288,7 +297,7 @@ namespace Editor
             sb.AppendLine();
             sb.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
 
-            File.WriteAllText(ResponseFile, sb.ToString());
+            File.WriteAllText(ResponseFile, sb.ToString(), Utf8Bom);
             AssetDatabase.Refresh();
         }
 
@@ -339,7 +348,7 @@ namespace Editor
                 }
             }
 
-            File.WriteAllText(ResponseFile, sb.ToString());
+            File.WriteAllText(ResponseFile, sb.ToString(), Utf8Bom);
             Debug.Log($"[UnityBridge] Compilation {(success ? "succeeded" : "failed")} in {duration:F1}s");
         }
 
