@@ -448,7 +448,7 @@ namespace Editor
             var results = new List<(GameObject, IDescribable)>();
 
             // Find all MonoBehaviours implementing IDescribable in the scene
-            var allBehaviours = UnityEngine.Object.FindObjectsOfType<MonoBehaviour>(false); // false = active only
+            var allBehaviours = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
 
             foreach (var mb in allBehaviours)
             {
