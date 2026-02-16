@@ -147,34 +147,46 @@ namespace Editor
 
         /// <summary>
         /// Builds _widgetMapping from a list of describables.
-        /// Short path = fragment.Name if unique among all widgets, otherwise Name#gameObjectName.
+        /// Registered widgets (via WidgetRegistry) get stable IDs assigned by the registry.
+        /// Unregistered widgets (plain IDescribable) use fragment.Name, disambiguated with #gameObjectName if needed.
         /// </summary>
         private static Dictionary<string, (GameObject go, IDescribable describable)> BuildWidgetMapping(
             List<(GameObject go, IDescribable describable)> describables)
         {
-            // Phase 1: collect all (go, describable, fragment.Name)
-            var entries = new List<(GameObject go, IDescribable describable, string name)>();
+            var mapping = new Dictionary<string, (GameObject go, IDescribable describable)>();
+
+            // Separate registered (stable ID) from unregistered (need disambiguation)
+            var unregistered = new List<(GameObject go, IDescribable describable, string name)>();
+
             foreach (var (go, describable) in describables)
             {
-                var fragment = describable.Describe();
-                var name = !string.IsNullOrEmpty(fragment.Name) ? fragment.Name : go.name;
-                entries.Add((go, describable, name));
+                if (WidgetRegistry.TryGetId(describable, out var stableId))
+                {
+                    mapping[stableId] = (go, describable);
+                }
+                else
+                {
+                    var fragment = describable.Describe();
+                    var name = !string.IsNullOrEmpty(fragment.Name) ? fragment.Name : go.name;
+                    unregistered.Add((go, describable, name));
+                }
             }
 
-            // Phase 2: detect duplicate names
-            var nameCounts = new Dictionary<string, int>();
-            foreach (var (_, _, name) in entries)
+            // Unregistered: old disambiguation logic
+            if (unregistered.Count > 0)
             {
-                nameCounts.TryGetValue(name, out var count);
-                nameCounts[name] = count + 1;
-            }
+                var nameCounts = new Dictionary<string, int>();
+                foreach (var (_, _, name) in unregistered)
+                {
+                    nameCounts.TryGetValue(name, out var count);
+                    nameCounts[name] = count + 1;
+                }
 
-            // Phase 3: build mapping
-            var mapping = new Dictionary<string, (GameObject go, IDescribable describable)>();
-            foreach (var (go, describable, name) in entries)
-            {
-                var key = nameCounts[name] > 1 ? $"{name}#{go.name}" : name;
-                mapping[key] = (go, describable);
+                foreach (var (go, describable, name) in unregistered)
+                {
+                    var key = nameCounts[name] > 1 ? $"{name}#{go.name}" : name;
+                    mapping[key] = (go, describable);
+                }
             }
 
             return mapping;
@@ -600,9 +612,18 @@ namespace Editor
         #region Action Resolution
 
         /// <summary>
-        /// Resolves a semantic action path like "Meteorite/Capture" or "Meteorite#Widget_meteorite_2/Capture"
-        /// to the widget + action via _widgetMapping lookup.
-        /// Format: WidgetKey/ActionId, where WidgetKey is everything before the last /.
+        /// Resolves a semantic action path like "Meteorite/Capture" or "Dock/Reactor@0,0/Remove"
+        /// to the widget + action by navigating through the fragment tree.
+        ///
+        /// Format: WidgetKey/[ChildName/]*/ActionId
+        /// - First segment = top-level widget key (from _widgetMapping)
+        /// - Middle segments (if any) = child names (navigate through ScreenFragment.Children)
+        /// - Last segment = action ID
+        ///
+        /// Examples:
+        /// - "Dock/Remove" → widget=Dock, action=Remove (top-level action)
+        /// - "Dock/Reactor@0,0/Remove" → widget=Dock, child=Reactor@0,0, action=Remove
+        /// - "Dock#GO_1/Child/Action" → widget=Dock#GO_1, child=Child, action=Action
         /// </summary>
         private static (IDescribable describable, GameObject go, string actionId, string error) ResolveAction(string actionPath)
         {
@@ -613,28 +634,72 @@ namespace Editor
             if (actionPath[0] == '/')
                 actionPath = actionPath[1..];
 
-            var lastSlash = actionPath.LastIndexOf('/');
-            if (lastSlash < 0)
+            var segments = actionPath.Split('/');
+            if (segments.Length < 2)
                 return (null, null, null, $"Error: Action path must contain at least Widget/Action. Got: `{actionPath}`");
 
-            var widgetKey = actionPath[..lastSlash];
-            var actionId = actionPath[(lastSlash + 1)..];
+            // First segment = top-level widget key
+            var widgetKey = segments[0];
+            if (!_widgetMapping.TryGetValue(widgetKey, out var entry))
+            {
+                var available = _widgetMapping.Count > 0
+                    ? "Available widgets: " + string.Join(", ", _widgetMapping.Keys)
+                    : "No widgets available (run `describe` first)";
+                return (null, null, null, $"Error: Widget `{widgetKey}` not found.\n{available}");
+            }
 
-            if (string.IsNullOrEmpty(widgetKey) || string.IsNullOrEmpty(actionId))
-                return (null, null, null, $"Error: Invalid action path `{actionPath}`. Expected format: `WidgetName/Action`");
+            var (go, describable) = entry;
+            var fragment = describable.Describe();
 
-            if (_widgetMapping.TryGetValue(widgetKey, out var entry))
-                return (entry.describable, entry.go, actionId, null);
+            // Last segment = action ID
+            var actionId = segments[^1];
 
-            // Not found — build helpful error
-            var available = _widgetMapping.Count > 0
-                ? "Available widgets: " + string.Join(", ", _widgetMapping.Keys)
-                : "No widgets available (run `describe` first)";
-            return (null, null, null, $"Error: Widget `{widgetKey}` not found.\n{available}");
+            // Middle segments (if any) = navigate through children
+            // Example: "Dock/Reactor@0,0/Remove" → segments = ["Dock", "Reactor@0,0", "Remove"]
+            // Need to navigate through "Reactor@0,0" to find the fragment containing "Remove"
+            for (int i = 1; i < segments.Length - 1; i++)
+            {
+                var childName = segments[i];
+                var child = FindChildByName(fragment, childName);
+
+                if (child == null)
+                {
+                    // Build helpful error with available children
+                    var availableChildren = fragment.Children != null && fragment.Children.Length > 0
+                        ? "Available children: " + string.Join(", ", Array.ConvertAll(fragment.Children, c => c.Name))
+                        : "No children available";
+                    var pathSoFar = string.Join("/", segments[..(i + 1)]);
+                    return (null, null, null, $"Error: Child `{childName}` not found in path `{pathSoFar}`.\n{availableChildren}");
+                }
+
+                fragment = child.Value;
+            }
+
+            // Now fragment is the one that should contain the action
+            return (describable, go, actionId, null);
+        }
+
+        /// <summary>
+        /// Searches fragment.Children for a child with the given name.
+        /// Returns null if not found or fragment has no children.
+        /// </summary>
+        private static ScreenFragment? FindChildByName(ScreenFragment fragment, string name)
+        {
+            if (fragment.Children == null) return null;
+
+            foreach (var child in fragment.Children)
+            {
+                if (child.Name == name)
+                    return child;
+            }
+
+            return null;
         }
 
         /// <summary>
         /// Searches the fragment tree (depth-first) for an action with the given ID.
+        /// NOTE: Now only used to find the action in the RESOLVED fragment (not the whole tree),
+        /// because ResolveAction navigates to the correct fragment first.
         /// </summary>
         private static GameAction FindActionInFragment(ScreenFragment fragment, string actionId)
         {

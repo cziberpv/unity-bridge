@@ -114,6 +114,36 @@ public class TreasureDoor : MonoBehaviour, IDescribable
 
 Path reads as narrative: `/Dock/Ship/Slot[1,1]/Equip` — I'm at the dock, on the ship, in slot 1,1 equipping something.
 
+## Stable IDs with WidgetRegistry
+
+When multiple copies of the same widget exist (meteorites, equipment, enemies), paths can shift as copies appear and disappear. `WidgetRegistry` assigns stable IDs that never change.
+
+**Simple widgets** — implement `IDescribable` directly. No registration needed:
+```csharp
+public class Torch : MonoBehaviour, IDescribable { ... }
+```
+
+**Widgets with duplicates** — inherit from `DescribableWidget`:
+```csharp
+public class MeteoriteWidget : DescribableWidget
+{
+    protected override string GetWidgetName() => "Meteorite";
+
+    public override ScreenFragment Describe() => new ScreenFragment
+    {
+        Name = WidgetId,  // "Meteorite", "Meteorite#2", "Meteorite#3" — stable
+        Description = "A chunk of space rock, glinting with ore.",
+        Actions = new[] { GameAction.Create("Capture", () => Capture()) }
+    };
+}
+```
+
+First Meteorite gets `Meteorite`. Second gets `Meteorite#2`. First destroyed — second stays `Meteorite#2`. Batch commands and agent memory work.
+
+`OnEnable` registers, `OnDisable` unregisters — `SetActive(false)` makes a widget vanish from describe automatically.
+
+**Complex widgets with modal flow** (ship configuration, crafting, dialogue) — stay as single `IDescribable`, use `WidgetRegistry` as a service for stable child IDs if needed. One coherent widget is better than N fragments when the agent needs the full picture.
+
 ## Acceptance Criterion
 
 > Came as a tester, left as a player.
