@@ -224,7 +224,7 @@ namespace Editor
             sb.AppendLine();
             sb.Append(content);
 
-            File.WriteAllText(ResponseFile, sb.ToString());
+            File.WriteAllText(ResponseFile, sb.ToString(), Utf8Bom);
             AssetDatabase.Refresh();
         }
 
@@ -237,7 +237,7 @@ namespace Editor
             sb.AppendLine();
             sb.AppendLine("Use `help` command for available options.");
 
-            File.WriteAllText(ResponseFile, sb.ToString());
+            File.WriteAllText(ResponseFile, sb.ToString(), Utf8Bom);
         }
 
         #endregion

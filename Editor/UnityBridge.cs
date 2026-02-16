@@ -27,6 +27,7 @@ namespace Editor
         private const string BridgeFolder = "Assets/LLM/Bridge";
         private const string RequestFile = "Assets/LLM/Bridge/request.json";
         private const string ResponseFile = "Assets/LLM/Bridge/response.md";
+        private static readonly Encoding Utf8Bom = new UTF8Encoding(true);
 
         private static DateTime _lastRequestCheck = DateTime.MinValue;
         private static DateTime _lastRequestModified = DateTime.MinValue;
@@ -59,11 +60,15 @@ namespace Editor
             Initialize();
             SetupCompilationTracking();
             InitializeScreenshot();
+            InitializePlay();
             EditorApplication.quitting += Cleanup;
         }
 
         // Partial method for screenshot initialization (implemented in UnityBridge.Screenshot.cs)
         static partial void InitializeScreenshot();
+
+        // Partial method for play command initialization (implemented in UnityBridge.Describe.cs)
+        static partial void InitializePlay();
 
         private static void SetupCompilationTracking()
         {
@@ -120,6 +125,11 @@ namespace Editor
                 File.WriteAllText(RequestFile, "{}");
             }
 
+            // Ensure game continues running when Editor loses focus.
+            // Critical for game-step timing — without this, Play Mode stalls
+            // when the user switches to another window.
+            Application.runInBackground = true;
+
             // Poll for changes (works even when Unity not focused)
             EditorApplication.update += PollForRequest;
 
@@ -133,6 +143,9 @@ namespace Editor
 
         private static void PollForRequest()
         {
+            // Async operations that need per-frame checks (before poll interval gate)
+            GameStepUpdate();
+
             // Check every PollIntervalSeconds
             var now = DateTime.Now;
             if ((now - _lastRequestCheck).TotalSeconds < PollIntervalSeconds)
@@ -163,16 +176,18 @@ namespace Editor
                 }
                 else
                 {
-                    var request = JsonConvert.DeserializeObject<BridgeRequest>(json);
+                    var jObj = JObject.Parse(json);
+                    var request = jObj.ToObject<BridgeRequest>();
                     if (string.IsNullOrEmpty(request.type))
                         return;
 
                     Debug.Log($"[UnityBridge] Processing request: {request.type} {request.path ?? request.query}");
 
+                    var warning = ValidateFields(jObj, request.type);
                     var response = HandleRequest(request);
                     // Some handlers write response directly (e.g., errors during compilation)
                     if (response != null)
-                        WriteResponse(request, response);
+                        WriteResponse(request, warning != null ? warning + response : response);
                 }
 
                 // Clear request file
@@ -189,22 +204,60 @@ namespace Editor
         {
             Debug.Log("[UnityBridge] Processing batch request");
 
-            // Parse JSON array manually (JsonUtility doesn't support arrays at root)
-            var requests = ParseBatchRequests(json);
-            if (requests == null || requests.Count == 0)
+            // Parse JSON array for both deserialization and field validation
+            JArray jArray;
+            List<BridgeRequest> requests;
+            try
+            {
+                jArray = JArray.Parse(json);
+                requests = jArray
+                    .OfType<JObject>()
+                    .Select(o => o.ToObject<BridgeRequest>())
+                    .Where(r => !string.IsNullOrEmpty(r?.type))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[UnityBridge] Failed to parse batch request: {ex.Message}");
+                requests = new List<BridgeRequest>();
+                jArray = null;
+            }
+
+            if (requests.Count == 0)
             {
                 WriteError("Failed to parse batch request. Ensure it's a valid JSON array.");
                 return;
             }
 
+            // Collect field warnings per batch item
+            var warnings = new List<string>();
+            var jObjects = jArray?.OfType<JObject>()
+                .Where(o => !string.IsNullOrEmpty(o["type"]?.ToString()))
+                .ToList();
+
             var results = new List<(string type, bool success, string message)>();
-            foreach (var request in requests)
+            for (int i = 0; i < requests.Count; i++)
             {
+                var request = requests[i];
+                if (jObjects != null && i < jObjects.Count)
+                {
+                    var w = ValidateFields(jObjects[i], request.type);
+                    if (w != null) warnings.Add($"[{i + 1}] {request.type}: {w.Trim()}");
+                }
+
                 try
                 {
                     var response = HandleRequest(request);
-                    var isError = response.StartsWith("Error:");
-                    results.Add((request.type, !isError, response));
+                    if (response == null)
+                    {
+                        // Async command (game-step, play, screenshot) — result will be written separately
+                        results.Add((request.type, true, "Command started asynchronously, result will follow."));
+                    }
+                    else
+                    {
+                        var isError = response.StartsWith("Error:");
+                        results.Add((request.type, !isError, response));
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -212,25 +265,11 @@ namespace Editor
                 }
             }
 
-            WriteBatchResponse(results);
+            WriteBatchResponse(results, warnings);
         }
 
-        private static List<BridgeRequest> ParseBatchRequests(string json)
-        {
-            try
-            {
-                return JsonConvert.DeserializeObject<List<BridgeRequest>>(json)
-                    ?.Where(r => !string.IsNullOrEmpty(r?.type))
-                    .ToList() ?? new List<BridgeRequest>();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[UnityBridge] Failed to parse batch request: {ex.Message}");
-                return new List<BridgeRequest>();
-            }
-        }
-
-        private static void WriteBatchResponse(List<(string type, bool success, string message)> results)
+        private static void WriteBatchResponse(List<(string type, bool success, string message)> results,
+            List<string> warnings = null)
         {
             var sb = new StringBuilder();
             var succeeded = 0;
@@ -239,6 +278,13 @@ namespace Editor
 
             sb.AppendLine($"# Batch: {succeeded}/{results.Count} succeeded");
             sb.AppendLine();
+
+            if (warnings != null && warnings.Count > 0)
+            {
+                foreach (var w in warnings)
+                    sb.AppendLine(w);
+                sb.AppendLine();
+            }
 
             for (int i = 0; i < results.Count; i++)
             {
@@ -251,7 +297,7 @@ namespace Editor
             sb.AppendLine();
             sb.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
 
-            File.WriteAllText(ResponseFile, sb.ToString());
+            File.WriteAllText(ResponseFile, sb.ToString(), Utf8Bom);
             AssetDatabase.Refresh();
         }
 
@@ -302,7 +348,7 @@ namespace Editor
                 }
             }
 
-            File.WriteAllText(ResponseFile, sb.ToString());
+            File.WriteAllText(ResponseFile, sb.ToString(), Utf8Bom);
             Debug.Log($"[UnityBridge] Compilation {(success ? "succeeded" : "failed")} in {duration:F1}s");
         }
 
@@ -386,8 +432,12 @@ namespace Editor
                 HandleDescribe),
             new("interact", "path", "Invoke action by semantic path (e.g. /Dock/Ship/Slot[1,0]/Unequip)", "AI Play",
                 HandleInteract),
-            new("game-step", "frames", "Advance N frames while paused (default 1), return describe. Large N (1000+) may not fully simulate physics/render per step", "AI Play",
+            new("game-step", "ms (required), speed", "Let game run for ms milliseconds at timeScale=speed (default 1), then pause and return describe delta", "AI Play",
                 HandleGameStep),
+            new("play", "speed (required)", "Enter Play Mode at timeScale=speed", "AI Play",
+                HandlePlay),
+            new("stop", "-", "Exit Play Mode", "AI Play",
+                HandleStop),
             new("time-scale", "value", "Get/set Time.timeScale (0.5 = half speed, 2 = double)", "AI Play",
                 HandleTimeScale),
 
@@ -408,6 +458,41 @@ namespace Editor
 
         private static Dictionary<string, CommandInfo> CommandMap =>
             _commandMap ??= Commands.ToDictionary(c => c.Type);
+
+        #endregion
+
+        #region Field Validation
+
+        // Known BridgeRequest field names — for detecting typos in agent requests
+        private static readonly HashSet<string> KnownFields = new()
+        {
+            "type", "path", "component", "property", "value", "properties",
+            "prefab", "parent", "components", "depth", "detail", "lens", "contrast",
+            "delay", "ms", "speed", "force", "query"
+        };
+
+        /// <summary>
+        /// Check raw JSON keys against known BridgeRequest fields.
+        /// Returns a warning string if unknown fields found, null otherwise.
+        /// </summary>
+        private static string ValidateFields(JObject jObj, string commandType)
+        {
+            var unknown = new List<string>();
+            foreach (var prop in jObj.Properties())
+            {
+                if (!KnownFields.Contains(prop.Name))
+                    unknown.Add(prop.Name);
+            }
+
+            if (unknown.Count == 0) return null;
+
+            var fieldList = string.Join("`, `", unknown);
+            var hint = "";
+            if (CommandMap.TryGetValue(commandType?.ToLower() ?? "", out var cmd) && cmd.Fields != "-")
+                hint = $" Known fields for `{commandType}`: `{cmd.Fields}`.";
+
+            return $"> **Warning:** Unknown field(s): `{fieldList}`.{hint}\n\n";
+        }
 
         #endregion
 
@@ -441,7 +526,8 @@ namespace Editor
             public float delay;           // Seconds to wait before capture (default 1)
 
             // AI Play options
-            public int frames;            // game-step: frames to advance (default 1)
+            public int ms;                // game-step: milliseconds to run (default 500)
+            public float speed = -1f;     // game-step/play: timeScale (-1 = not provided)
 
             // Scene operations
             public bool force;            // For new-scene/open-scene: discard unsaved changes without asking

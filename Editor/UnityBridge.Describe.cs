@@ -1,29 +1,140 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
+using System.IO;
 using System.Text;
 using Newtonsoft.Json.Linq;
+using UnityBridge;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 namespace Editor
 {
     /// <summary>
     /// Semantic UI description system for AI agents.
     /// Widgets implement IDescribable to expose their state and actions.
-    /// Bridge walks the hierarchy, builds semantic paths, renders text for the agent.
+    /// Bridge uses flat discovery (all active IDescribable in scene), builds semantic paths, renders text for the agent.
     /// </summary>
     public static partial class UnityBridge
     {
+        #region Play Mode State
+
+        // EditorPrefs keys for play command (survive domain reload)
+        private const string PrefKeyPlayPending = "UnityBridge.PlayPending";
+        private const string PrefKeyPlaySpeed = "UnityBridge.PlaySpeed";
+
+        /// <summary>
+        /// Called from Initialize (via partial method) to check if a play command
+        /// is pending after domain reload, and to subscribe to playModeStateChanged.
+        /// </summary>
+        static partial void InitializePlay()
+        {
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+        }
+
+        private static void OnPlayModeStateChanged(PlayModeStateChange state)
+        {
+            if (state != PlayModeStateChange.EnteredPlayMode) return;
+            if (!EditorPrefs.GetBool(PrefKeyPlayPending, false)) return;
+
+            // Play command was pending — apply timeScale and write response
+            var speed = EditorPrefs.GetFloat(PrefKeyPlaySpeed, 1f);
+
+            // Clear prefs before writing response
+            EditorPrefs.DeleteKey(PrefKeyPlayPending);
+            EditorPrefs.DeleteKey(PrefKeyPlaySpeed);
+
+            Time.timeScale = speed;
+            Debug.Log($"[UnityBridge] Play Mode started, timeScale={speed}");
+
+            // Write response: confirmation + full describe
+            var sb = new StringBuilder();
+            sb.AppendLine("<!-- Request: play -->");
+            sb.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
+            sb.AppendLine();
+            sb.AppendLine($"**Play Mode started** at timeScale={speed}");
+            if (speed == 0f)
+                sb.AppendLine("\n> **Paused.** Use `game-step` to advance or `time-scale` to set speed.");
+            sb.AppendLine();
+            sb.Append(HandleDescribeFull(null));
+
+            File.WriteAllText(ResponseFile, sb.ToString(), Utf8Bom);
+        }
+
+        private static string HandlePlay(BridgeRequest request)
+        {
+            // speed is required — no default. -1 means not provided.
+            if (request.speed < 0f)
+                return "Error: `speed` is required. Example: `{\"type\": \"play\", \"speed\": 1}`\nUse speed=0 to start paused.";
+
+            var speed = request.speed;
+
+            if (EditorApplication.isPlaying)
+            {
+                // Already in Play Mode — just set timeScale
+                Time.timeScale = speed;
+                var pause = speed == 0f ? "\n> **Paused.** Use `game-step` to advance or `time-scale` to set speed.\n" : "";
+                return $"**timeScale={speed}**\n{pause}\n" + HandleDescribeFull(null);
+            }
+
+            // Guard: dirty scene triggers modal dialog
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            if (scene.isDirty)
+                return "Error: Scene has unsaved changes. Use `save-scene` first — entering Play Mode with a dirty scene triggers a modal dialog that freezes the Bridge.";
+
+            // Store in EditorPrefs and enter Play Mode (domain reload will follow)
+            EditorPrefs.SetBool(PrefKeyPlayPending, true);
+            EditorPrefs.SetFloat(PrefKeyPlaySpeed, speed);
+            EditorApplication.isPlaying = true;
+
+            Debug.Log($"[UnityBridge] play: entering Play Mode at speed={speed}");
+            return null; // Response written by OnPlayModeStateChanged after domain reload
+        }
+
+        private static string HandleStop(BridgeRequest request)
+        {
+            if (!EditorApplication.isPlaying)
+                return "Not in Play Mode.";
+
+            EditorApplication.isPlaying = false;
+            return "**Exiting Play Mode...**";
+        }
+
+        #endregion
+
         #region Delta Cache
 
         /// <summary>
-        /// Per-widget render cache keyed by semantic path.
+        /// Per-widget render cache keyed by short semantic path.
         /// Survives between commands, reset on domain reload (static field).
         /// Used by HandleDescribeDelta to return only changed widgets.
         /// </summary>
         private static Dictionary<string, string> _describeCache = new();
+
+        /// <summary>
+        /// Maps short semantic path → (GameObject, IDescribable).
+        /// Rebuilt on every describe/describe-delta. Used by interact to resolve actions.
+        /// Key format: "Name" (if unique) or "Name#gameObjectName" (if ambiguous).
+        /// </summary>
+        private static Dictionary<string, (GameObject go, IDescribable describable)> _widgetMapping = new();
+
+        #endregion
+
+        #region Game Step State
+
+        /// <summary>
+        /// True while game-step is running (timeScale != 0, waiting for duration to elapse).
+        /// Resets to false on domain reload — acceptable, response is lost but Bridge won't hang.
+        /// </summary>
+        private static bool _gameStepPending = false;
+
+        /// <summary>EditorApplication.timeSinceStartup when game-step started (real time, unaffected by timeScale).</summary>
+        private static double _gameStepStartTime;
+
+        /// <summary>How long to let the game run, in milliseconds.</summary>
+        private static int _gameStepDurationMs;
+
+        /// <summary>What timeScale to use during the step (default 1).</summary>
+        private static float _gameStepTargetTimeScale = 1f;
 
         #endregion
 
@@ -35,7 +146,42 @@ namespace Editor
         }
 
         /// <summary>
-        /// Full describe: renders all widgets, updates cache. Always returns complete output.
+        /// Builds _widgetMapping from a list of describables.
+        /// Short path = fragment.Name if unique among all widgets, otherwise Name#gameObjectName.
+        /// </summary>
+        private static Dictionary<string, (GameObject go, IDescribable describable)> BuildWidgetMapping(
+            List<(GameObject go, IDescribable describable)> describables)
+        {
+            // Phase 1: collect all (go, describable, fragment.Name)
+            var entries = new List<(GameObject go, IDescribable describable, string name)>();
+            foreach (var (go, describable) in describables)
+            {
+                var fragment = describable.Describe();
+                var name = !string.IsNullOrEmpty(fragment.Name) ? fragment.Name : go.name;
+                entries.Add((go, describable, name));
+            }
+
+            // Phase 2: detect duplicate names
+            var nameCounts = new Dictionary<string, int>();
+            foreach (var (_, _, name) in entries)
+            {
+                nameCounts.TryGetValue(name, out var count);
+                nameCounts[name] = count + 1;
+            }
+
+            // Phase 3: build mapping
+            var mapping = new Dictionary<string, (GameObject go, IDescribable describable)>();
+            foreach (var (go, describable, name) in entries)
+            {
+                var key = nameCounts[name] > 1 ? $"{name}#{go.name}" : name;
+                mapping[key] = (go, describable);
+            }
+
+            return mapping;
+        }
+
+        /// <summary>
+        /// Full describe: renders all widgets, updates cache and mapping. Always returns complete output.
         /// </summary>
         private static string HandleDescribeFull(string root)
         {
@@ -44,10 +190,14 @@ namespace Editor
             if (describables.Count == 0)
             {
                 _describeCache.Clear();
+                _widgetMapping.Clear();
                 if (!string.IsNullOrEmpty(root))
                     return $"No IDescribable found at `{root}` or its children.";
                 return "No IDescribable found in scene.\n\nWidgets must implement `IDescribable` to appear here.";
             }
+
+            var mapping = BuildWidgetMapping(describables);
+            _widgetMapping = mapping;
 
             var sb = new StringBuilder();
             sb.AppendLine("# Screen");
@@ -55,19 +205,24 @@ namespace Editor
 
             var newCache = new Dictionary<string, string>();
 
-            foreach (var (go, describable) in describables)
+            foreach (var (shortPath, (go, describable)) in mapping)
             {
-                var basePath = "/" + GetFullPath(go);
                 var fragment = describable.Describe();
                 var widgetSb = new StringBuilder();
-                RenderFragment(widgetSb, fragment, basePath, indent: 0);
+                RenderFragment(widgetSb, fragment, shortPath, indent: 0);
                 var rendered = widgetSb.ToString();
 
-                newCache[basePath] = rendered;
+                newCache[shortPath] = rendered;
                 sb.Append(rendered);
             }
 
             _describeCache = newCache;
+
+            // Collect and append events (describe clears events as side effect)
+            var events = CollectEvents();
+            if (!string.IsNullOrEmpty(events))
+                sb.Append(events);
+
             return sb.ToString();
         }
 
@@ -87,27 +242,31 @@ namespace Editor
             {
                 var hadWidgets = _describeCache.Count > 0;
                 _describeCache.Clear();
+                _widgetMapping.Clear();
                 if (hadWidgets)
                     return "All widgets gone.";
                 return "No changes.";
             }
+
+            // Rebuild mapping (widgets may have appeared/disappeared)
+            var mapping = BuildWidgetMapping(describables);
+            _widgetMapping = mapping;
 
             var newCache = new Dictionary<string, string>();
             var delta = new StringBuilder();
             var hasChanges = false;
 
             // Render current widgets, compare with cache
-            foreach (var (go, describable) in describables)
+            foreach (var (shortPath, (go, describable)) in mapping)
             {
-                var basePath = "/" + GetFullPath(go);
                 var fragment = describable.Describe();
                 var widgetSb = new StringBuilder();
-                RenderFragment(widgetSb, fragment, basePath, indent: 0);
+                RenderFragment(widgetSb, fragment, shortPath, indent: 0);
                 var rendered = widgetSb.ToString();
 
-                newCache[basePath] = rendered;
+                newCache[shortPath] = rendered;
 
-                if (_describeCache.TryGetValue(basePath, out var cached))
+                if (_describeCache.TryGetValue(shortPath, out var cached))
                 {
                     // Existed before — check if changed
                     if (rendered != cached)
@@ -143,10 +302,7 @@ namespace Editor
         {
             var actionPath = request.path;
             if (string.IsNullOrEmpty(actionPath))
-                return "Error: path required. Example: {\"type\": \"interact\", \"path\": \"/Dock/Ship/Slot[1,0]/Unequip\"}";
-
-            // Path format: /Root/.../WidgetObject/ActionName
-            // We need to find the widget and the action within it
+                return "Error: path required. Example: {\"type\": \"interact\", \"path\": \"WidgetName/Action\"}";
 
             var (describable, go, actionId, error) = ResolveAction(actionPath);
             if (error != null)
@@ -173,7 +329,7 @@ namespace Editor
                 return $"Error executing `{actionId}`: {ex.Message}";
             }
 
-            // Return result + delta describe (interaction changes may ripple across the whole screen)
+            // Return result + events + delta describe (interaction changes may ripple across the whole screen)
             var sb = new StringBuilder();
 
             if (!string.IsNullOrEmpty(result))
@@ -181,6 +337,10 @@ namespace Editor
                 sb.AppendLine($"**Result:** {result}");
                 sb.AppendLine();
             }
+
+            var events = CollectEvents();
+            if (!string.IsNullOrEmpty(events))
+                sb.Append(events);
 
             sb.Append(HandleDescribeDelta());
 
@@ -192,21 +352,104 @@ namespace Editor
             if (!EditorApplication.isPlaying)
                 return "Error: game-step requires Play Mode.";
 
-            // Auto-pause if not paused (step without pause makes no sense)
-            if (!EditorApplication.isPaused)
-                EditorApplication.isPaused = true;
+            if (_gameStepPending)
+                return "Error: game-step already in progress. Wait for it to complete.";
 
-            var frames = request.frames > 0 ? request.frames : 1;
+            if (request.ms <= 0)
+                return "Error: game-step requires `ms` — how many milliseconds to run. Example: {\"type\": \"game-step\", \"ms\": 150}";
+            var ms = request.ms;
+            var speed = request.speed >= 0 ? request.speed : 1f;
 
-            for (int i = 0; i < frames; i++)
-                EditorApplication.Step();
+            // Set timeScale to let the game run
+            _gameStepTargetTimeScale = speed;
+            Time.timeScale = speed;
 
-            var sb = new StringBuilder();
-            sb.AppendLine($"**Stepped:** {frames} frame(s)");
-            sb.AppendLine();
-            sb.Append(HandleDescribeDelta());
+            // Record start in real time (unaffected by timeScale)
+            _gameStepStartTime = EditorApplication.timeSinceStartup;
+            _gameStepDurationMs = ms;
+            _gameStepPending = true;
 
-            return sb.ToString();
+            Debug.Log($"[UnityBridge] game-step: running {ms}ms at timeScale={speed}");
+
+            return null; // Response written by GameStepUpdate when duration elapses
+        }
+
+        /// <summary>
+        /// Called from main update loop. Checks if game-step duration has elapsed,
+        /// then pauses (timeScale=0) and writes the describe response.
+        /// </summary>
+        private static void GameStepUpdate()
+        {
+            if (!_gameStepPending)
+                return;
+
+            // Edge case: game exited Play Mode while step was running
+            if (!EditorApplication.isPlaying)
+            {
+                _gameStepPending = false;
+                var sb = new StringBuilder();
+                sb.AppendLine("<!-- Request: game-step -->");
+                sb.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
+                sb.AppendLine();
+                sb.AppendLine("Error: Play Mode exited during game-step.");
+                File.WriteAllText(ResponseFile, sb.ToString(), Utf8Bom);
+                Debug.LogWarning("[UnityBridge] game-step cancelled: Play Mode exited");
+                return;
+            }
+
+            // Check elapsed real time
+            var elapsedMs = (EditorApplication.timeSinceStartup - _gameStepStartTime) * 1000.0;
+            if (elapsedMs < _gameStepDurationMs)
+                return;
+
+            // Duration elapsed — pause and respond.
+            // try/finally ensures _gameStepPending is cleared and timeScale is reset
+            // even if describe/events/file-write throws, so the bridge never gets stuck.
+            try
+            {
+                Time.timeScale = 0f;
+
+                Debug.Log($"[UnityBridge] game-step complete: {elapsedMs:F0}ms elapsed, paused");
+
+                // Build response: events + describe delta (or full if cache empty)
+                var response = new StringBuilder();
+                response.AppendLine("<!-- Request: game-step -->");
+                response.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
+                response.AppendLine();
+                response.AppendLine($"**Stepped:** {_gameStepDurationMs}ms (timeScale={_gameStepTargetTimeScale})");
+                response.AppendLine();
+
+                var events = CollectEvents();
+                if (!string.IsNullOrEmpty(events))
+                    response.Append(events);
+
+                response.Append(HandleDescribeDelta());
+
+                File.WriteAllText(ResponseFile, response.ToString(), Utf8Bom);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[UnityBridge] game-step response failed: {ex}");
+                try
+                {
+                    var error = new StringBuilder();
+                    error.AppendLine("<!-- Request: game-step -->");
+                    error.AppendLine($"<!-- Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss} -->");
+                    error.AppendLine();
+                    error.AppendLine($"Error during game-step response: {ex.Message}");
+                    File.WriteAllText(ResponseFile, error.ToString(), Utf8Bom);
+                }
+                catch
+                {
+                    // Last resort: if even error response write fails, just log
+                    Debug.LogError("[UnityBridge] Failed to write game-step error response");
+                }
+            }
+            finally
+            {
+                _gameStepPending = false;
+                Time.timeScale = 0f;
+            }
         }
 
         private static string HandleTimeScale(BridgeRequest request)
@@ -228,57 +471,77 @@ namespace Editor
 
         #endregion
 
-        #region Hierarchy Traversal
+        #region Event Collection
 
         /// <summary>
-        /// Find all root IDescribable widgets in the scene.
-        /// If path is specified, search only under that GameObject.
-        /// Skips nested IDescribable (they are children of another IDescribable).
+        /// Collects events from all IDescribable widgets. Events are cleared on read (GetEvents contract).
+        /// Returns formatted markdown string, or empty string if no events.
+        /// </summary>
+        private static string CollectEvents()
+        {
+            var describables = FindDescribables(null);
+            if (describables.Count == 0) return "";
+
+            var sb = new StringBuilder();
+
+            foreach (var (go, describable) in describables)
+            {
+                var events = describable.GetEvents();
+                if (events == null || events.Count == 0) continue;
+
+                var widgetName = go.name;
+                foreach (var evt in events)
+                {
+                    sb.AppendLine($"- **{widgetName}**: {evt}");
+                }
+            }
+
+            if (sb.Length == 0) return "";
+
+            var result = new StringBuilder();
+            result.AppendLine("## Events");
+            result.Append(sb);
+            result.AppendLine();
+            return result.ToString();
+        }
+
+        #endregion
+
+        #region Discovery
+
+        /// <summary>
+        /// Flat discovery: find ALL active IDescribable widgets in the scene.
+        /// Every IDescribable is equal — no hierarchy filtering. Internal widget trees
+        /// (Children in ScreenFragment) are each widget's own responsibility.
+        /// If rootPath is specified, filters to widgets whose scene path starts with rootPath.
         /// </summary>
         private static List<(GameObject go, IDescribable describable)> FindDescribables(string rootPath)
         {
             var results = new List<(GameObject, IDescribable)>();
 
-            IEnumerable<GameObject> roots;
-            if (!string.IsNullOrEmpty(rootPath))
-            {
-                var rootGo = FindGameObjectByPath(rootPath);
-                if (rootGo == null) return results;
-                roots = new[] { rootGo };
-            }
-            else
-            {
-                roots = SceneManager.GetActiveScene().GetRootGameObjects();
-            }
+            // Find all MonoBehaviours implementing IDescribable in the scene
+            var allBehaviours = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
 
-            foreach (var root in roots)
+            foreach (var mb in allBehaviours)
             {
-                CollectRootDescribables(root, results, parentIsDescribable: false);
+                if (mb is not IDescribable describable) continue;
+                if (!mb.gameObject.activeInHierarchy) continue;
+
+                // If rootPath specified, filter by scene path prefix (boundary-aware)
+                if (!string.IsNullOrEmpty(rootPath))
+                {
+                    var fullPath = GetFullPath(mb.gameObject);
+                    if (!fullPath.StartsWith(rootPath, StringComparison.Ordinal))
+                        continue;
+                    // Ensure match is at path boundary: exact match or next char is '/'
+                    if (fullPath.Length > rootPath.Length && fullPath[rootPath.Length] != '/')
+                        continue;
+                }
+
+                results.Add((mb.gameObject, describable));
             }
 
             return results;
-        }
-
-        /// <summary>
-        /// Recursively collects IDescribable that are NOT nested under another IDescribable.
-        /// Nested ones are discovered by the parent's Describe() via Children.
-        /// </summary>
-        private static void CollectRootDescribables(GameObject go, List<(GameObject, IDescribable)> results, bool parentIsDescribable)
-        {
-            var describable = go.GetComponent<IDescribable>();
-            if (describable != null)
-            {
-                if (!parentIsDescribable)
-                    results.Add((go, describable));
-                // Don't recurse into children — the widget owns its sub-tree
-                return;
-            }
-
-            // No IDescribable on this GO — recurse into children
-            foreach (Transform child in go.transform)
-            {
-                CollectRootDescribables(child.gameObject, results, parentIsDescribable);
-            }
         }
 
         #endregion
@@ -337,61 +600,37 @@ namespace Editor
         #region Action Resolution
 
         /// <summary>
-        /// Resolves an action path like "/Dock/Ship/Slot[1,0]/Unequip" to the widget + action.
-        /// Strategy: walk from the scene root, find the deepest GameObject with IDescribable,
-        /// then resolve the remaining path segments as action ID within the fragment tree.
+        /// Resolves a semantic action path like "Meteorite/Capture" or "Meteorite#Widget_meteorite_2/Capture"
+        /// to the widget + action via _widgetMapping lookup.
+        /// Format: WidgetKey/ActionId, where WidgetKey is everything before the last /.
         /// </summary>
         private static (IDescribable describable, GameObject go, string actionId, string error) ResolveAction(string actionPath)
         {
-            if (string.IsNullOrEmpty(actionPath) || actionPath[0] != '/')
-                return (null, null, null, $"Error: Action path must start with /. Got: `{actionPath}`");
+            if (string.IsNullOrEmpty(actionPath))
+                return (null, null, null, "Error: Action path required. Example: `{\"type\": \"interact\", \"path\": \"WidgetName/Action\"}`");
 
-            // Strip leading /
-            var path = actionPath[1..];
-            var parts = path.Split('/');
+            // Strip leading / if present (backward compat, but paths should no longer start with /)
+            if (actionPath[0] == '/')
+                actionPath = actionPath[1..];
 
-            if (parts.Length < 2)
-                return (null, null, null, $"Error: Action path too short. Need at least /Widget/Action. Got: `{actionPath}`");
+            var lastSlash = actionPath.LastIndexOf('/');
+            if (lastSlash < 0)
+                return (null, null, null, $"Error: Action path must contain at least Widget/Action. Got: `{actionPath}`");
 
-            // Try progressively longer prefixes to find the IDescribable GameObject
-            GameObject bestGo = null;
-            IDescribable bestDescribable = null;
-            int bestIndex = -1;
+            var widgetKey = actionPath[..lastSlash];
+            var actionId = actionPath[(lastSlash + 1)..];
 
-            // Build path from parts, testing each prefix
-            for (int i = parts.Length - 1; i >= 0; i--)
-            {
-                var goPath = string.Join("/", parts, 0, i + 1);
-                var go = FindGameObjectByPath(goPath);
-                if (go != null)
-                {
-                    var describable = go.GetComponent<IDescribable>();
-                    if (describable != null)
-                    {
-                        bestGo = go;
-                        bestDescribable = describable;
-                        bestIndex = i;
-                        break;
-                    }
-                }
-            }
+            if (string.IsNullOrEmpty(widgetKey) || string.IsNullOrEmpty(actionId))
+                return (null, null, null, $"Error: Invalid action path `{actionPath}`. Expected format: `WidgetName/Action`");
 
-            if (bestDescribable == null)
-                return (null, null, null, $"Error: No IDescribable found in path `{actionPath}`");
+            if (_widgetMapping.TryGetValue(widgetKey, out var entry))
+                return (entry.describable, entry.go, actionId, null);
 
-            // Remaining segments form the action path within the fragment tree
-            var remainingParts = parts.Skip(bestIndex + 1).ToArray();
-            if (remainingParts.Length == 0)
-                return (null, null, null, $"Error: No action specified in path `{actionPath}`. Path points to widget, not action.");
-
-            // The last segment is the action ID, middle segments navigate children
-            var actionId = remainingParts[^1];
-
-            // If there are intermediate segments, we'd need to navigate the fragment tree
-            // For now, we search the full fragment tree for the action
-            // (child navigation through fragment.Children is handled by FindActionInFragment)
-
-            return (bestDescribable, bestGo, actionId, null);
+            // Not found — build helpful error
+            var available = _widgetMapping.Count > 0
+                ? "Available widgets: " + string.Join(", ", _widgetMapping.Keys)
+                : "No widgets available (run `describe` first)";
+            return (null, null, null, $"Error: Widget `{widgetKey}` not found.\n{available}");
         }
 
         /// <summary>
@@ -426,79 +665,4 @@ namespace Editor
         #endregion
     }
 
-    #region Contracts
-
-    /// <summary>
-    /// Implement on MonoBehaviour to make a widget visible to AI agents via "describe" command.
-    /// The widget knows its own name and structure, but NOT its full path — the Bridge builds paths during traversal.
-    /// See IDescribable.md for cookbook and best practices.
-    /// </summary>
-    public interface IDescribable
-    {
-        /// <summary>
-        /// Return a snapshot of the widget's current state: name, children, available actions.
-        /// Called every time the agent requests "describe". Must be stateless and cheap.
-        /// </summary>
-        ScreenFragment Describe();
-    }
-
-    /// <summary>
-    /// A snapshot of one UI element: its identity, description, actions, and children.
-    /// Immutable by convention — create new instances, don't mutate.
-    /// </summary>
-    public struct ScreenFragment
-    {
-        /// <summary>Display name of this element (e.g., "Sparrow MK-I", "Scanner-T1").</summary>
-        public string Name;
-
-        /// <summary>Optional semantic label (e.g., "Ship", "Slot[0,0]"). Renders as "Label: Name".</summary>
-        public string Label;
-
-        /// <summary>Optional description for context (e.g., "Damaged", "Tier 2").</summary>
-        public string Description;
-
-        /// <summary>Actions available on this element. Null or empty = no actions.</summary>
-        public GameAction[] Actions;
-
-        /// <summary>Nested elements. Null or empty = leaf node.</summary>
-        public ScreenFragment[] Children;
-    }
-
-    /// <summary>
-    /// An action the agent can invoke via "interact" command.
-    /// </summary>
-    public class GameAction
-    {
-        /// <summary>Semantic identifier used in action paths (e.g., "Unequip", "Launch", "Equip").</summary>
-        public string Id;
-
-        /// <summary>Optional human-readable hint (e.g., "Go to Hub"). Shown to agent if present.</summary>
-        public string Hint;
-
-        /// <summary>Whether the action can be invoked right now.</summary>
-        public bool Enabled;
-
-        /// <summary>Why disabled — shown to agent so it doesn't waste a turn. Null if enabled.</summary>
-        public string DisabledReason;
-
-        /// <summary>
-        /// The callback. Returns an optional result message (null = silent success).
-        /// Bridge calls this, then re-describes the widget to show updated state.
-        /// </summary>
-        public Func<string> Execute;
-
-        /// <summary>Create an enabled action.</summary>
-        public static GameAction Create(string id, Func<string> execute, string hint = null)
-        {
-            return new GameAction { Id = id, Enabled = true, Execute = execute, Hint = hint };
-        }
-
-        /// <summary>Create a disabled action (visible but not invocable).</summary>
-        public static GameAction Disabled(string id, string reason)
-        {
-            return new GameAction { Id = id, Enabled = false, DisabledReason = reason, Execute = null };
-        }
-    }
-
-    #endregion
 }

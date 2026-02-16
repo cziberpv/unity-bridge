@@ -1,4 +1,5 @@
 using System;
+using UnityBridge;
 using UnityEngine;
 
 namespace Editor
@@ -77,7 +78,7 @@ namespace Editor
         {
             // If lever not set, try to find it
             if (lever == null)
-                lever = FindObjectOfType<TreasureLever>();
+                lever = FindAnyObjectByType<TreasureLever>();
         }
 
         public ScreenFragment Describe()

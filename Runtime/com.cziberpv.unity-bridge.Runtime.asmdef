@@ -1,14 +1,8 @@
 {
-    "name": "com.cziberpv.unity-bridge.Editor",
+    "name": "com.cziberpv.unity-bridge.Runtime",
     "rootNamespace": "",
-    "references": [
-        "Unity.Newtonsoft.Json",
-        "Unity.TextMeshPro",
-        "com.cziberpv.unity-bridge.Runtime"
-    ],
-    "includePlatforms": [
-        "Editor"
-    ],
+    "references": [],
+    "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": false,

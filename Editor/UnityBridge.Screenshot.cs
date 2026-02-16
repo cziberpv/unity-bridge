@@ -271,7 +271,7 @@ namespace Editor
                 }
             }
 
-            File.WriteAllText(ResponseFile, sb.ToString());
+            File.WriteAllText(ResponseFile, sb.ToString(), Utf8Bom);
         }
     }
 }
