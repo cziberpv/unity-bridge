@@ -60,8 +60,8 @@ Semantic UI for agents playing the game, not just editing it. Widgets implementi
 # Interact via semantic path
 .\unity-cmd.ps1 '{"type": "interact", "path": "/Dock/Ship/Slot[1,1]/Equip"}'
 
-# Advance N frames in paused Play Mode (returns delta)
-.\unity-cmd.ps1 '{"type": "game-step", "frames": 10}'
+# Advance game by milliseconds in Play Mode (returns delta)
+.\unity-cmd.ps1 '{"type": "game-step", "ms": 150}'
 
 # Set time scale (0.5 = half speed, 2 = double)
 .\unity-cmd.ps1 '{"type": "time-scale", "value": 0.5}'
@@ -71,7 +71,7 @@ Semantic UI for agents playing the game, not just editing it. Widgets implementi
 
 **Semantic paths** — read like narrative: `/Dock/Ship/Slot[1,1]/Equip` = "at the dock, on the ship, in slot 1,1, equipping something". Widget names are world names ("Treasure Chest"), action IDs are verbs ("Open", "Pull").
 
-**Game-step note** — currently being redesigned. Millisecond-based approach planned instead of frame-based.
+**Game-step** — pauses the game (timeScale=0), runs for the specified milliseconds, pauses again. 150ms ≈ one snake move at starting speed.
 
 See `IDescribable.md` for widget authoring patterns, text quality guidelines, and design philosophy.
 

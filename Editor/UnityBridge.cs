@@ -423,7 +423,7 @@ namespace Editor
                 HandleDescribe),
             new("interact", "path", "Invoke action by semantic path (e.g. /Dock/Ship/Slot[1,0]/Unequip)", "AI Play",
                 HandleInteract),
-            new("game-step", "ms, speed", "Let game run for ms milliseconds (default 500) at timeScale=speed (default 1), then pause and return describe delta", "AI Play",
+            new("game-step", "ms (required), speed", "Let game run for ms milliseconds at timeScale=speed (default 1), then pause and return describe delta", "AI Play",
                 HandleGameStep),
             new("play", "speed (required)", "Enter Play Mode at timeScale=speed", "AI Play",
                 HandlePlay),
@@ -459,7 +459,7 @@ namespace Editor
         {
             "type", "path", "component", "property", "value", "properties",
             "prefab", "parent", "components", "depth", "detail", "lens", "contrast",
-            "delay", "frames", "ms", "speed", "force", "query"
+            "delay", "ms", "speed", "force", "query"
         };
 
         /// <summary>
@@ -517,7 +517,6 @@ namespace Editor
             public float delay;           // Seconds to wait before capture (default 1)
 
             // AI Play options
-            public int frames;            // game-step: legacy, kept for backward compat
             public int ms;                // game-step: milliseconds to run (default 500)
             public float speed = -1f;     // game-step/play: timeScale (-1 = not provided)
 

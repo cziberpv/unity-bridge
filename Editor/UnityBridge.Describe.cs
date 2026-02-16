@@ -310,7 +310,9 @@ namespace Editor
             if (_gameStepPending)
                 return "Error: game-step already in progress. Wait for it to complete.";
 
-            var ms = request.ms > 0 ? request.ms : 500;
+            if (request.ms <= 0)
+                return "Error: game-step requires `ms` — how many milliseconds to run. Example: {\"type\": \"game-step\", \"ms\": 150}";
+            var ms = request.ms;
             var speed = request.speed >= 0 ? request.speed : 1f;
 
             // Set timeScale to let the game run
