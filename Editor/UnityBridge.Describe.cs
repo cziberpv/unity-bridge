@@ -7,14 +7,13 @@ using Newtonsoft.Json.Linq;
 using UnityBridge;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 namespace Editor
 {
     /// <summary>
     /// Semantic UI description system for AI agents.
     /// Widgets implement IDescribable to expose their state and actions.
-    /// Bridge walks the hierarchy, builds semantic paths, renders text for the agent.
+    /// Bridge uses flat discovery (all active IDescribable in scene), builds semantic paths, renders text for the agent.
     /// </summary>
     public static partial class UnityBridge
     {
@@ -436,57 +435,41 @@ namespace Editor
 
         #endregion
 
-        #region Hierarchy Traversal
+        #region Discovery
 
         /// <summary>
-        /// Find all root IDescribable widgets in the scene.
-        /// If path is specified, search only under that GameObject.
-        /// Skips nested IDescribable (they are children of another IDescribable).
+        /// Flat discovery: find ALL active IDescribable widgets in the scene.
+        /// Every IDescribable is equal — no hierarchy filtering. Internal widget trees
+        /// (Children in ScreenFragment) are each widget's own responsibility.
+        /// If rootPath is specified, filters to widgets whose scene path starts with rootPath.
         /// </summary>
         private static List<(GameObject go, IDescribable describable)> FindDescribables(string rootPath)
         {
             var results = new List<(GameObject, IDescribable)>();
 
-            IEnumerable<GameObject> roots;
-            if (!string.IsNullOrEmpty(rootPath))
-            {
-                var rootGo = FindGameObjectByPath(rootPath);
-                if (rootGo == null) return results;
-                roots = new[] { rootGo };
-            }
-            else
-            {
-                roots = SceneManager.GetActiveScene().GetRootGameObjects();
-            }
+            // Find all MonoBehaviours implementing IDescribable in the scene
+            var allBehaviours = UnityEngine.Object.FindObjectsOfType<MonoBehaviour>(false); // false = active only
 
-            foreach (var root in roots)
+            foreach (var mb in allBehaviours)
             {
-                CollectRootDescribables(root, results, parentIsDescribable: false);
+                if (mb is not IDescribable describable) continue;
+                if (!mb.gameObject.activeInHierarchy) continue;
+
+                // If rootPath specified, filter by scene path prefix (boundary-aware)
+                if (!string.IsNullOrEmpty(rootPath))
+                {
+                    var fullPath = GetFullPath(mb.gameObject);
+                    if (!fullPath.StartsWith(rootPath, StringComparison.Ordinal))
+                        continue;
+                    // Ensure match is at path boundary: exact match or next char is '/'
+                    if (fullPath.Length > rootPath.Length && fullPath[rootPath.Length] != '/')
+                        continue;
+                }
+
+                results.Add((mb.gameObject, describable));
             }
 
             return results;
-        }
-
-        /// <summary>
-        /// Recursively collects IDescribable that are NOT nested under another IDescribable.
-        /// Nested ones are discovered by the parent's Describe() via Children.
-        /// </summary>
-        private static void CollectRootDescribables(GameObject go, List<(GameObject, IDescribable)> results, bool parentIsDescribable)
-        {
-            var describable = go.GetComponent<IDescribable>();
-            if (describable != null)
-            {
-                if (!parentIsDescribable)
-                    results.Add((go, describable));
-                // Don't recurse into children — the widget owns its sub-tree
-                return;
-            }
-
-            // No IDescribable on this GO — recurse into children
-            foreach (Transform child in go.transform)
-            {
-                CollectRootDescribables(child.gameObject, results, parentIsDescribable);
-            }
         }
 
         #endregion
