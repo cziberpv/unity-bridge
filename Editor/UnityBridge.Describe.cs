@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 using Newtonsoft.Json.Linq;
 using UnityBridge;
@@ -105,11 +104,18 @@ namespace Editor
         #region Delta Cache
 
         /// <summary>
-        /// Per-widget render cache keyed by semantic path.
+        /// Per-widget render cache keyed by short semantic path.
         /// Survives between commands, reset on domain reload (static field).
         /// Used by HandleDescribeDelta to return only changed widgets.
         /// </summary>
         private static Dictionary<string, string> _describeCache = new();
+
+        /// <summary>
+        /// Maps short semantic path → (GameObject, IDescribable).
+        /// Rebuilt on every describe/describe-delta. Used by interact to resolve actions.
+        /// Key format: "Name" (if unique) or "Name#gameObjectName" (if ambiguous).
+        /// </summary>
+        private static Dictionary<string, (GameObject go, IDescribable describable)> _widgetMapping = new();
 
         #endregion
 
@@ -140,7 +146,42 @@ namespace Editor
         }
 
         /// <summary>
-        /// Full describe: renders all widgets, updates cache. Always returns complete output.
+        /// Builds _widgetMapping from a list of describables.
+        /// Short path = fragment.Name if unique among all widgets, otherwise Name#gameObjectName.
+        /// </summary>
+        private static Dictionary<string, (GameObject go, IDescribable describable)> BuildWidgetMapping(
+            List<(GameObject go, IDescribable describable)> describables)
+        {
+            // Phase 1: collect all (go, describable, fragment.Name)
+            var entries = new List<(GameObject go, IDescribable describable, string name)>();
+            foreach (var (go, describable) in describables)
+            {
+                var fragment = describable.Describe();
+                var name = !string.IsNullOrEmpty(fragment.Name) ? fragment.Name : go.name;
+                entries.Add((go, describable, name));
+            }
+
+            // Phase 2: detect duplicate names
+            var nameCounts = new Dictionary<string, int>();
+            foreach (var (_, _, name) in entries)
+            {
+                nameCounts.TryGetValue(name, out var count);
+                nameCounts[name] = count + 1;
+            }
+
+            // Phase 3: build mapping
+            var mapping = new Dictionary<string, (GameObject go, IDescribable describable)>();
+            foreach (var (go, describable, name) in entries)
+            {
+                var key = nameCounts[name] > 1 ? $"{name}#{go.name}" : name;
+                mapping[key] = (go, describable);
+            }
+
+            return mapping;
+        }
+
+        /// <summary>
+        /// Full describe: renders all widgets, updates cache and mapping. Always returns complete output.
         /// </summary>
         private static string HandleDescribeFull(string root)
         {
@@ -149,10 +190,14 @@ namespace Editor
             if (describables.Count == 0)
             {
                 _describeCache.Clear();
+                _widgetMapping.Clear();
                 if (!string.IsNullOrEmpty(root))
                     return $"No IDescribable found at `{root}` or its children.";
                 return "No IDescribable found in scene.\n\nWidgets must implement `IDescribable` to appear here.";
             }
+
+            var mapping = BuildWidgetMapping(describables);
+            _widgetMapping = mapping;
 
             var sb = new StringBuilder();
             sb.AppendLine("# Screen");
@@ -160,15 +205,14 @@ namespace Editor
 
             var newCache = new Dictionary<string, string>();
 
-            foreach (var (go, describable) in describables)
+            foreach (var (shortPath, (go, describable)) in mapping)
             {
-                var basePath = "/" + GetFullPath(go);
                 var fragment = describable.Describe();
                 var widgetSb = new StringBuilder();
-                RenderFragment(widgetSb, fragment, basePath, indent: 0);
+                RenderFragment(widgetSb, fragment, shortPath, indent: 0);
                 var rendered = widgetSb.ToString();
 
-                newCache[basePath] = rendered;
+                newCache[shortPath] = rendered;
                 sb.Append(rendered);
             }
 
@@ -198,27 +242,31 @@ namespace Editor
             {
                 var hadWidgets = _describeCache.Count > 0;
                 _describeCache.Clear();
+                _widgetMapping.Clear();
                 if (hadWidgets)
                     return "All widgets gone.";
                 return "No changes.";
             }
+
+            // Rebuild mapping (widgets may have appeared/disappeared)
+            var mapping = BuildWidgetMapping(describables);
+            _widgetMapping = mapping;
 
             var newCache = new Dictionary<string, string>();
             var delta = new StringBuilder();
             var hasChanges = false;
 
             // Render current widgets, compare with cache
-            foreach (var (go, describable) in describables)
+            foreach (var (shortPath, (go, describable)) in mapping)
             {
-                var basePath = "/" + GetFullPath(go);
                 var fragment = describable.Describe();
                 var widgetSb = new StringBuilder();
-                RenderFragment(widgetSb, fragment, basePath, indent: 0);
+                RenderFragment(widgetSb, fragment, shortPath, indent: 0);
                 var rendered = widgetSb.ToString();
 
-                newCache[basePath] = rendered;
+                newCache[shortPath] = rendered;
 
-                if (_describeCache.TryGetValue(basePath, out var cached))
+                if (_describeCache.TryGetValue(shortPath, out var cached))
                 {
                     // Existed before — check if changed
                     if (rendered != cached)
@@ -254,10 +302,7 @@ namespace Editor
         {
             var actionPath = request.path;
             if (string.IsNullOrEmpty(actionPath))
-                return "Error: path required. Example: {\"type\": \"interact\", \"path\": \"/Dock/Ship/Slot[1,0]/Unequip\"}";
-
-            // Path format: /Root/.../WidgetObject/ActionName
-            // We need to find the widget and the action within it
+                return "Error: path required. Example: {\"type\": \"interact\", \"path\": \"WidgetName/Action\"}";
 
             var (describable, go, actionId, error) = ResolveAction(actionPath);
             if (error != null)
@@ -528,61 +573,37 @@ namespace Editor
         #region Action Resolution
 
         /// <summary>
-        /// Resolves an action path like "/Dock/Ship/Slot[1,0]/Unequip" to the widget + action.
-        /// Strategy: walk from the scene root, find the deepest GameObject with IDescribable,
-        /// then resolve the remaining path segments as action ID within the fragment tree.
+        /// Resolves a semantic action path like "Meteorite/Capture" or "Meteorite#Widget_meteorite_2/Capture"
+        /// to the widget + action via _widgetMapping lookup.
+        /// Format: WidgetKey/ActionId, where WidgetKey is everything before the last /.
         /// </summary>
         private static (IDescribable describable, GameObject go, string actionId, string error) ResolveAction(string actionPath)
         {
-            if (string.IsNullOrEmpty(actionPath) || actionPath[0] != '/')
-                return (null, null, null, $"Error: Action path must start with /. Got: `{actionPath}`");
+            if (string.IsNullOrEmpty(actionPath))
+                return (null, null, null, "Error: Action path required. Example: `{\"type\": \"interact\", \"path\": \"WidgetName/Action\"}`");
 
-            // Strip leading /
-            var path = actionPath[1..];
-            var parts = path.Split('/');
+            // Strip leading / if present (backward compat, but paths should no longer start with /)
+            if (actionPath[0] == '/')
+                actionPath = actionPath[1..];
 
-            if (parts.Length < 2)
-                return (null, null, null, $"Error: Action path too short. Need at least /Widget/Action. Got: `{actionPath}`");
+            var lastSlash = actionPath.LastIndexOf('/');
+            if (lastSlash < 0)
+                return (null, null, null, $"Error: Action path must contain at least Widget/Action. Got: `{actionPath}`");
 
-            // Try progressively longer prefixes to find the IDescribable GameObject
-            GameObject bestGo = null;
-            IDescribable bestDescribable = null;
-            int bestIndex = -1;
+            var widgetKey = actionPath[..lastSlash];
+            var actionId = actionPath[(lastSlash + 1)..];
 
-            // Build path from parts, testing each prefix
-            for (int i = parts.Length - 1; i >= 0; i--)
-            {
-                var goPath = string.Join("/", parts, 0, i + 1);
-                var go = FindGameObjectByPath(goPath);
-                if (go != null)
-                {
-                    var describable = go.GetComponent<IDescribable>();
-                    if (describable != null)
-                    {
-                        bestGo = go;
-                        bestDescribable = describable;
-                        bestIndex = i;
-                        break;
-                    }
-                }
-            }
+            if (string.IsNullOrEmpty(widgetKey) || string.IsNullOrEmpty(actionId))
+                return (null, null, null, $"Error: Invalid action path `{actionPath}`. Expected format: `WidgetName/Action`");
 
-            if (bestDescribable == null)
-                return (null, null, null, $"Error: No IDescribable found in path `{actionPath}`");
+            if (_widgetMapping.TryGetValue(widgetKey, out var entry))
+                return (entry.describable, entry.go, actionId, null);
 
-            // Remaining segments form the action path within the fragment tree
-            var remainingParts = parts.Skip(bestIndex + 1).ToArray();
-            if (remainingParts.Length == 0)
-                return (null, null, null, $"Error: No action specified in path `{actionPath}`. Path points to widget, not action.");
-
-            // The last segment is the action ID, middle segments navigate children
-            var actionId = remainingParts[^1];
-
-            // If there are intermediate segments, we'd need to navigate the fragment tree
-            // For now, we search the full fragment tree for the action
-            // (child navigation through fragment.Children is handled by FindActionInFragment)
-
-            return (bestDescribable, bestGo, actionId, null);
+            // Not found — build helpful error
+            var available = _widgetMapping.Count > 0
+                ? "Available widgets: " + string.Join(", ", _widgetMapping.Keys)
+                : "No widgets available (run `describe` first)";
+            return (null, null, null, $"Error: Widget `{widgetKey}` not found.\n{available}");
         }
 
         /// <summary>
