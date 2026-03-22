@@ -410,7 +410,7 @@ namespace Editor
                 HandleAddComponentRequest),
             new("delete-component", "path, component", "Remove a component", "Write",
                 HandleDeleteComponentRequest),
-            new("set", "path, component, property/value or properties", "Set serialized properties", "Write",
+            new("set", "path, component, property/value or properties", "Set properties (component: \"GameObject\" for active)", "Write",
                 HandleSetRequest),
             new("save-scene", "-", "Save current scene", "Write",
                 _ => HandleSaveSceneRequest()),

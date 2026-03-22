@@ -307,6 +307,12 @@ namespace Editor
             if (go == null)
                 return $"Error: GameObject not found: `{request.path}`";
 
+            // GameObject.active — special case (not a serialized component property)
+            if (request.component.Equals("GameObject", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return SetGameObjectProperties(go, request);
+            }
+
             var compType = FindType(request.component);
             if (compType == null)
                 return $"Error: Component type not found: `{request.component}`";
@@ -364,6 +370,41 @@ namespace Editor
             EditorUtility.SetDirty(component);
             UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(go.scene);
 
+            return sb.ToString();
+        }
+
+        private static string SetGameObjectProperties(GameObject go, BridgeRequest request)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"Set `{GetFullPath(go)}` GameObject:");
+
+            var props = request.properties != null && request.properties.Length > 0
+                ? request.properties
+                : !string.IsNullOrEmpty(request.property) && request.value != null
+                    ? new[] { new PropertyKV { key = request.property, value = request.value } }
+                    : null;
+
+            if (props == null)
+                return "Error: Either 'properties' array or 'property'/'value' pair required.";
+
+            foreach (var kvp in props)
+            {
+                if (kvp.key.Equals("active", System.StringComparison.OrdinalIgnoreCase) ||
+                    kvp.key.Equals("activeSelf", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    var val = kvp.value.ToString().Trim().ToLower();
+                    var active = val == "true" || val == "1";
+                    go.SetActive(active);
+                    sb.AppendLine($"  - active = {active}");
+                }
+                else
+                {
+                    sb.AppendLine($"  - {kvp.key}: Error - unknown GameObject property (supported: active)");
+                }
+            }
+
+            EditorUtility.SetDirty(go);
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(go.scene);
             return sb.ToString();
         }
 
