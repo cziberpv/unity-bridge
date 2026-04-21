@@ -5,9 +5,9 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Editor
+namespace UnityBridge.Editor
 {
-    public static partial class UnityBridge
+    public static partial class Bridge
     {
         #region Lens System
 

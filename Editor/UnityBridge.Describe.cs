@@ -3,18 +3,17 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Newtonsoft.Json.Linq;
-using UnityBridge;
 using UnityEditor;
 using UnityEngine;
 
-namespace Editor
+namespace UnityBridge.Editor
 {
     /// <summary>
     /// Semantic UI description system for AI agents.
     /// Widgets implement IDescribable to expose their state and actions.
     /// Bridge uses flat discovery (all active IDescribable in scene), builds semantic paths, renders text for the agent.
     /// </summary>
-    public static partial class UnityBridge
+    public static partial class Bridge
     {
         #region Play Mode State
 

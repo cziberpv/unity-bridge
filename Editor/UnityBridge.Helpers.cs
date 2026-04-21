@@ -7,9 +7,9 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace Editor
+namespace UnityBridge.Editor
 {
-    public static partial class UnityBridge
+    public static partial class Bridge
     {
         #region Helpers
 

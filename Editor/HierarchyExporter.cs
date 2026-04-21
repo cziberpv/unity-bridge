@@ -9,7 +9,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace Editor
+namespace UnityBridge.Editor
 {
     public static class HierarchyExporter
     {

@@ -1,9 +1,9 @@
 using System;
 using System.Reflection;
 
-namespace Editor
+namespace UnityBridge.Editor
 {
-    public static partial class UnityBridge
+    public static partial class Bridge
     {
         private static string HandleScratch()
         {

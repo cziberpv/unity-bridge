@@ -3,7 +3,7 @@ using UnityEditor;
 using UnityEditor.PackageManager;
 using UnityEngine;
 
-namespace Editor
+namespace UnityBridge.Editor
 {
     /// <summary>
     /// Copies required files from the UPM package to the user's project:

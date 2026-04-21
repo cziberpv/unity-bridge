@@ -7,9 +7,9 @@ using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
 
-namespace Editor
+namespace UnityBridge.Editor
 {
-    public static partial class UnityBridge
+    public static partial class Bridge
     {
         #region Write Command Handlers
 

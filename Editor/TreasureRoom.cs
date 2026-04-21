@@ -1,8 +1,7 @@
 using System;
-using UnityBridge;
 using UnityEngine;
 
-namespace Editor
+namespace UnityBridge.Editor
 {
     /// <summary>
     /// Treasure Chest — opens to reveal gold coins inside.

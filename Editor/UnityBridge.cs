@@ -9,7 +9,7 @@ using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEngine;
 
-namespace Editor
+namespace UnityBridge.Editor
 {
     /// <summary>
     /// File-based bridge for AI communication with Unity Editor.
@@ -22,7 +22,7 @@ namespace Editor
     /// - UnityBridge.Helpers.cs - utility methods
     /// </summary>
     [InitializeOnLoad]
-    public static partial class UnityBridge
+    public static partial class Bridge
     {
         private const string BridgeFolder = "Assets/LLM/Bridge";
         private const string RequestFile = "Assets/LLM/Bridge/request.json";
@@ -55,7 +55,7 @@ namespace Editor
             set => EditorPrefs.SetBool(PrefKeyRefreshPending, value);
         }
 
-        static UnityBridge()
+        static Bridge()
         {
             Initialize();
             SetupCompilationTracking();

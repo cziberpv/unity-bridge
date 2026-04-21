@@ -4,7 +4,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-namespace Editor
+namespace UnityBridge.Editor
 {
     /// <summary>
     /// UnityBridge screenshot command.
@@ -17,7 +17,7 @@ namespace Editor
     /// Runtime errors during Play Mode are captured and included in response.
     /// State survives domain reload via EditorPrefs.
     /// </summary>
-    public static partial class UnityBridge
+    public static partial class Bridge
     {
         private const string ScreenshotFolder = "Assets/LLM/Bridge/Screenshots";
         private const float ScreenshotSafetyMargin = 30f;

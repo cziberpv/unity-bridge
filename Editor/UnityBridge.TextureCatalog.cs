@@ -7,7 +7,7 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 
-namespace Editor
+namespace UnityBridge.Editor
 {
     /// <summary>
     /// UnityBridge texture catalog commands.
@@ -17,7 +17,7 @@ namespace Editor
     /// - texture-scan: Scan folder and update catalog
     /// - texture-search: Search catalog by tags/description
     /// </summary>
-    public static partial class UnityBridge
+    public static partial class Bridge
     {
         private const string CatalogPath = "Assets/LLM/texture-catalog.json";
 
