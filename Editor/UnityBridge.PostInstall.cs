@@ -9,15 +9,14 @@ namespace UnityBridge.Editor
     /// Copies required files from the UPM package to the user's project:
     /// - unity-cmd.ps1 → project root (updated on package version change)
     /// - BridgeScratch.cs → Assets/Editor/ (template, only if missing)
-    /// - README.ai → Assets/Editor/ (only if missing)
     /// </summary>
     [InitializeOnLoad]
     public static class UnityBridgePostInstall
     {
         private const string VersionPrefKey = "UnityBridge.InstalledVersion";
         private const string ScratchPath = "Assets/Editor/BridgeScratch.cs";
-        private const string ReadMeAiPath = "Assets/Editor/README.ai";
         private const string CmdScriptPath = "unity-cmd.ps1";
+        private const string AiBootstrapUrl = "https://raw.githubusercontent.com/cziberpv/unity-bridge/master/docs/ai/README.md";
 
         static UnityBridgePostInstall()
         {
@@ -43,21 +42,6 @@ namespace UnityBridge.Editor
                 Debug.Log("[UnityBridge] Created scratch pad: " + ScratchPath);
             }
 
-            // Copy README.ai if missing
-            if (!File.Exists(ReadMeAiPath))
-            {
-                var source = Path.Combine(packagePath, "Editor", "README.ai");
-                if (File.Exists(source))
-                {
-                    File.Copy(source, ReadMeAiPath);
-                    Debug.Log("[UnityBridge] Copied README.ai to " + ReadMeAiPath);
-                }
-                else
-                {
-                    Debug.LogWarning($"[UnityBridge PostInstall] README.ai not found at: {source}");
-                }
-            }
-
             // Copy/update unity-cmd.ps1 on install or version change
             if (installedVersion != currentVersion || !File.Exists(CmdScriptPath))
             {
@@ -66,6 +50,7 @@ namespace UnityBridge.Editor
                 {
                     File.Copy(source, CmdScriptPath, overwrite: true);
                     Debug.Log("[UnityBridge] Copied unity-cmd.ps1 to project root (v" + currentVersion + ")");
+                    Debug.Log("[UnityBridge] AI agents: bootstrap at " + AiBootstrapUrl);
                 }
                 else
                 {

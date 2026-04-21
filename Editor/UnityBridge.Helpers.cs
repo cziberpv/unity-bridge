@@ -240,6 +240,27 @@ namespace UnityBridge.Editor
             File.WriteAllText(ResponseFile, sb.ToString(), Utf8Bom);
         }
 
+        private const string BootstrapUrl = "https://raw.githubusercontent.com/cziberpv/unity-bridge/master/docs/ai/README.md";
+        private const string BootstrapHint = "AI bootstrap: " + BootstrapUrl;
+
+        private static List<string> ListSerializedPropertyNames(SerializedObject so)
+        {
+            var result = new List<string>();
+            var it = so.GetIterator();
+            if (it.NextVisible(true))
+            {
+                do { result.Add(it.name); } while (it.NextVisible(false));
+            }
+            return result;
+        }
+
+        private static string ListComponentNames(GameObject go)
+        {
+            return string.Join(", ", go.GetComponents<Component>()
+                .Where(c => c != null)
+                .Select(c => c.GetType().Name));
+        }
+
         #endregion
     }
 }

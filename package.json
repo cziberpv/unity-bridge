@@ -1,6 +1,6 @@
 {
     "name": "com.cziberpv.unity-bridge",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "displayName": "Unity Bridge",
     "description": "File-based bridge between AI agents and Unity Editor. JSON commands in, markdown responses out.",
     "unity": "2021.3",

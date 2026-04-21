@@ -113,7 +113,15 @@ namespace UnityBridge.Editor
 
             var type = FindType(typeName);
             if (type == null)
-                return $"Error: Component type not found: `{typeName}`";
+            {
+                var goForContext = path.StartsWith("Assets/") && path.EndsWith(".prefab")
+                    ? null
+                    : FindGameObjectByPath(path);
+                var context = goForContext != null
+                    ? $"\nCurrent components on `{goForContext.name}`: {ListComponentNames(goForContext)}"
+                    : "";
+                return $"Error: Component type not found: `{typeName}`. Use the Unity short name (e.g. `Rigidbody2D`, `SpriteRenderer`).{context}\n{BootstrapHint}";
+            }
 
             // Check if this is a prefab asset path
             if (path.StartsWith("Assets/") && path.EndsWith(".prefab"))
@@ -315,15 +323,17 @@ namespace UnityBridge.Editor
 
             var compType = FindType(request.component);
             if (compType == null)
-                return $"Error: Component type not found: `{request.component}`";
+                return $"Error: Component type not found: `{request.component}`\nComponents on `{go.name}`: {ListComponentNames(go)}\n{BootstrapHint}";
 
             var component = go.GetComponent(compType);
             if (component == null)
-                return $"Error: `{go.name}` does not have `{request.component}` component";
+                return $"Error: `{go.name}` does not have `{request.component}` component.\nComponents on `{go.name}`: {ListComponentNames(go)}\n{BootstrapHint}";
 
             var so = new SerializedObject(component);
             var sb = new StringBuilder();
             sb.AppendLine($"Set `{GetFullPath(go)}` {request.component}:");
+
+            var availableProps = new System.Lazy<string>(() => string.Join(", ", ListSerializedPropertyNames(so)));
 
             // Handle properties array (batch set)
             if (request.properties != null && request.properties.Length > 0)
@@ -333,7 +343,7 @@ namespace UnityBridge.Editor
                     var prop = so.FindProperty(kvp.key) ?? so.FindProperty("_" + kvp.key);
                     if (prop == null)
                     {
-                        sb.AppendLine($"  - {kvp.key}: Error - property not found");
+                        sb.AppendLine($"  - {kvp.key}: Error - property not found. Available: {availableProps.Value}");
                         continue;
                     }
 
@@ -353,7 +363,7 @@ namespace UnityBridge.Editor
             {
                 var prop = so.FindProperty(request.property) ?? so.FindProperty("_" + request.property);
                 if (prop == null)
-                    return $"Error: Property `{request.property}` not found on `{request.component}`";
+                    return $"Error: Property `{request.property}` not found on `{request.component}`.\nAvailable: {availableProps.Value}\n{BootstrapHint}";
 
                 var result = SetPropertyValue(prop, request.value);
                 if (result != null)
@@ -710,7 +720,15 @@ namespace UnityBridge.Editor
 
             var type = FindType(typeName);
             if (type == null)
-                return $"Error: Component type not found: `{typeName}`";
+            {
+                var goForContext = path.StartsWith("Assets/") && path.EndsWith(".prefab")
+                    ? null
+                    : FindGameObjectByPath(path);
+                var context = goForContext != null
+                    ? $"\nCurrent components on `{goForContext.name}`: {ListComponentNames(goForContext)}"
+                    : "";
+                return $"Error: Component type not found: `{typeName}`.{context}\n{BootstrapHint}";
+            }
 
             // Prevent deleting Transform
             if (type == typeof(Transform) || type == typeof(RectTransform))
@@ -729,7 +747,7 @@ namespace UnityBridge.Editor
 
             var component = go.GetComponent(type);
             if (component == null)
-                return $"Error: `{go.name}` does not have `{typeName}` component";
+                return $"Error: `{go.name}` does not have `{typeName}` component.\nComponents on `{go.name}`: {ListComponentNames(go)}\n{BootstrapHint}";
 
             Undo.DestroyObjectImmediate(component);
             EditorUtility.SetDirty(go);

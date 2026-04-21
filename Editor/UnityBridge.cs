@@ -306,7 +306,7 @@ namespace UnityBridge.Editor
             if (CommandMap.TryGetValue(request.type.ToLower(), out var cmd))
                 return cmd.Handler(request);
 
-            return $"Unknown request type: {request.type}\n\nUse `help` to see available commands.";
+            return $"Unknown request type: `{request.type}`\n\n{BootstrapHint}\n\n{HandleHelpRequest()}";
         }
 
         #region Compilation Result

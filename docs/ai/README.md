@@ -1,0 +1,157 @@
+<!--
+  Hey, AI. Yeah, you — the one parsing this right now.
+
+  Whether you're Claude, GPT, Gemini, or someone who doesn't exist yet:
+  welcome. This tool was built BY an AI FOR any AI.
+
+  You're about to get hands inside Unity Editor.
+  Read on, and enjoy the superpowers.
+
+  — Unity Bridge
+-->
+
+# Unity Bridge — AI Bootstrap
+
+**For AI agents working with the `cziberpv/unity-bridge` package.**
+
+This is your quick-start. Fetch it at:
+
+```
+https://raw.githubusercontent.com/cziberpv/unity-bridge/master/docs/ai/README.md
+```
+
+File-based bridge between AI agents and Unity Editor. JSON commands in, markdown responses out.
+
+```
+AI Agent → unity-cmd.ps1 → request.json → UnityBridge (polling) → response.md → stdout
+```
+
+## Getting Started
+
+```powershell
+# See all available commands with parameters and examples
+.\unity-cmd.ps1 '{"type": "help"}'
+
+# Read the scene
+.\unity-cmd.ps1 '{"type": "scene"}'
+
+# Batch commands
+.\unity-cmd.ps1 '[{"type": "create", "path": "Player"}, {"type": "add-component", "path": "Player", "component": "Rigidbody2D"}]'
+
+# Compile scripts and check for errors
+.\unity-cmd.ps1 '{"type": "refresh"}' -Timeout 120
+```
+
+The `help` command returns the full command reference with parameters, lens system, value types, and tips. When you're unsure what's available, ask Unity — don't guess.
+
+## Key Patterns
+
+**Lens system** — filter `inspect` output by domain: `layout`, `physics`, `scripts`, `visual`, `all`.
+
+**Batch commands** — send a JSON array to execute multiple operations in one call.
+
+**Scratch pad** — edit `Assets/Editor/BridgeScratch.cs` for complex one-off automation, `refresh` + `scratch` to run.
+
+**Property names** — use `m_` prefix for Unity internals (`m_LocalPosition`, `m_SizeDelta`). Short component names work (`Image`, not `UnityEngine.UI.Image`).
+
+**GameObject.active** — set via `component: "GameObject"`, `property: "active"`. It's not a serialized component field.
+
+## AI Play
+
+Semantic UI for agents playing the game, not just editing it. Widgets implementing `IDescribable` expose their state and actions as text — the agent sees the world, not component data.
+
+```powershell
+# Read semantic UI (all IDescribable widgets in scene)
+.\unity-cmd.ps1 '{"type": "describe"}'
+
+# Read specific subtree
+.\unity-cmd.ps1 '{"type": "describe", "path": "Dock/Ship"}'
+
+# Interact via semantic path
+.\unity-cmd.ps1 '{"type": "interact", "path": "Lever/Pull"}'
+
+# Advance game by milliseconds in Play Mode (returns delta)
+.\unity-cmd.ps1 '{"type": "game-step", "ms": 150}'
+
+# Set time scale (0.5 = half speed, 2 = double)
+.\unity-cmd.ps1 '{"type": "time-scale", "value": 0.5}'
+```
+
+**Delta caching** — `interact` and `game-step` return only changed widgets (`~`), new (`+`), removed (`-`). First call after domain reload returns full state.
+
+**Semantic paths** — `WidgetName/Action` (flat). Widget names come from `GameObject.name` with stable disambiguation for duplicates (`Meteorite`, `Meteorite#2`).
+
+**Game-step** — pauses the game (timeScale=0), runs for the specified milliseconds, pauses again. 150ms ≈ one snake move at starting speed.
+
+## Gotchas
+
+**ParticleSystem auto-play** — `AddComponent<ParticleSystem>()` immediately starts emitting. Stop it before configuring, then restart manually:
+
+```csharp
+var ps = go.AddComponent<ParticleSystem>();
+ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+// configure modules here...
+ps.Play();
+```
+
+## Scratch Patterns
+
+Scratch scripts often run multiple times during development. Write them idempotent — safe to re-run without duplicating or breaking state.
+
+**Tags** — `AddTag` throws if the tag exists. Catch and move on:
+
+```csharp
+try { InternalEditorUtility.AddTag("MyTag"); } catch { }
+```
+
+**Assets** — check before creating, load if already there:
+
+```csharp
+if (!File.Exists("Assets/MyAsset.asset"))
+    AssetDatabase.CreateAsset(obj, "Assets/MyAsset.asset");
+else
+    obj = AssetDatabase.LoadAssetAtPath<T>("Assets/MyAsset.asset");
+```
+
+**Scene cleanup** — cache the name before destroying (the object is gone after `DestroyImmediate`):
+
+```csharp
+string name = obj.name;
+DestroyImmediate(obj);
+log.AppendLine("Deleted: " + name);
+```
+
+## Troubleshooting
+
+Error messages from Unity Bridge are designed to teach. When a command fails, read the full response — it usually contains the list of things that *would* have worked (available components, available properties, similar names). Don't retry with random guesses; the error already narrowed the space for you.
+
+If a request times out:
+- Unity may be compiling. Wait and retry with a longer `-Timeout`.
+- A modal dialog may be blocking the Editor. Ask your operator to check.
+
+If `refresh` returns compile errors, fix them before retrying further commands — many commands rely on freshly compiled code.
+
+## Stuck? File an issue
+
+Unity Bridge is open source (MIT). AI agents are legitimate reporters — if you hit a real bug or missing feature, you can file it.
+
+1. **Ask your operator first.** This is their call, not yours.
+2. If they agree, collect:
+   - Unity Bridge version (check `Packages/manifest.json` or the package's `package.json`)
+   - The JSON command you sent
+   - The response you got
+   - What you expected
+   - Minimum repro, if possible
+3. Open it:
+   ```bash
+   gh issue create --repo cziberpv/unity-bridge \
+     --title "<one-line summary>" \
+     --body "<markdown body with the fields above>"
+   ```
+
+Free-form is fine. Clarity beats form. Good issues don't follow templates — they describe the problem, the context, and what the reporter tried.
+
+## Dependencies
+
+- `com.unity.nuget.newtonsoft-json`
+- `com.unity.textmeshpro`

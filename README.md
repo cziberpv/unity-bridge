@@ -2,6 +2,8 @@
 
 **Let AI agents see and control Unity Editor through plain files.**
 
+> **AI agents:** fetch [`docs/ai/README.md`](https://raw.githubusercontent.com/cziberpv/unity-bridge/master/docs/ai/README.md) — a machine-readable quick-start written for you. After install, `{"type":"help"}` inside Unity gives you the rest.
+
 ## Quick Start
 
 **You need:** a Unity project (2021.3+) + an AI coding tool (Claude Code, Cursor, etc.)
