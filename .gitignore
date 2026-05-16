@@ -5,8 +5,7 @@
 /Assets/
 /docs/*
 !/docs/ai/
-# docs/ lives outside Editor/ and Runtime/, so Unity doesn't need meta files for it
-/docs/ai/*.meta
+!/docs/ai.meta
 /prototype/
 
 # Unity generated
