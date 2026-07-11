@@ -152,7 +152,7 @@ The lens system dramatically reduces token usage. A typical UI Canvas might prod
 | `duplicate` | `path`, `value` | Duplicate a GameObject. Optional `value` for new name |
 | `add-component` | `path`, `component` | Add a component. Works on scene objects and prefab assets |
 | `delete-component` | `path`, `component` | Remove a component (Transform cannot be removed) |
-| `set` | `path`, `component`, `property`/`value` or `properties` | Set serialized properties. Supports single or batch |
+| `set` | `path`, `component`, `property`/`value` or `properties` | Set serialized properties. `properties` takes a dict: `{"key": value, ...}` (a KV array `[{"key": ..., "value": ...}]` also works) |
 | `save-scene` | -- | Save current scene |
 | `new-scene` | `path`, `force` | Create and open a new scene. `force: true` skips save dialog |
 | `open-scene` | `path`, `force` | Open an existing scene |
@@ -208,10 +208,10 @@ Send a JSON array to execute multiple commands in sequence:
 ```json
 [
   {"type": "create", "path": "Player", "components": ["Rigidbody2D", "BoxCollider2D", "SpriteRenderer"]},
-  {"type": "set", "path": "Player", "component": "Rigidbody2D", "properties": [
-    {"key": "gravityScale", "value": 0},
-    {"key": "linearDamping", "value": 2}
-  ]},
+  {"type": "set", "path": "Player", "component": "Rigidbody2D", "properties": {
+    "gravityScale": 0,
+    "linearDamping": 2
+  }},
   {"type": "set", "path": "Player", "component": "SpriteRenderer", "property": "m_Color", "value": [0, 1, 0, 1]}
 ]
 ```
@@ -261,10 +261,10 @@ powershell -ExecutionPolicy Bypass -File unity-cmd.ps1 '{"type": "refresh"}' -Ti
 ```json
 [
   {"type": "create", "path": "Player", "components": ["Rigidbody2D", "BoxCollider2D", "SpriteRenderer"]},
-  {"type": "set", "path": "Player", "component": "Transform", "properties": [
-    {"key": "m_LocalPosition", "value": [0, 0, 0]},
-    {"key": "m_LocalScale", "value": [0.5, 0.5, 1]}
-  ]},
+  {"type": "set", "path": "Player", "component": "Transform", "properties": {
+    "m_LocalPosition": [0, 0, 0],
+    "m_LocalScale": [0.5, 0.5, 1]
+  }},
   {"type": "set", "path": "Player", "component": "Rigidbody2D", "property": "gravityScale", "value": 0}
 ]
 ```

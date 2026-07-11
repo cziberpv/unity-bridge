@@ -59,11 +59,12 @@ if ($File) {
 }
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$requestFile = Join-Path $projectRoot "Assets\LLM\Bridge\request.json"
-$responseFile = Join-Path $projectRoot "Assets\LLM\Bridge\response.md"
+# Nested Join-Path: on pwsh for macOS/Linux "\" is a filename character, not a separator
+$bridgeFolder = Join-Path (Join-Path (Join-Path $projectRoot "Assets") "LLM") "Bridge"
+$requestFile = Join-Path $bridgeFolder "request.json"
+$responseFile = Join-Path $bridgeFolder "response.md"
 
 # Ensure bridge folder exists
-$bridgeFolder = Split-Path -Parent $requestFile
 if (-not (Test-Path $bridgeFolder)) {
     New-Item -ItemType Directory -Path $bridgeFolder -Force | Out-Null
 }

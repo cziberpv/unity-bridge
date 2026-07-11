@@ -373,7 +373,7 @@ namespace UnityBridge.Editor
             }
             else
             {
-                return "Error: Either 'properties' array or 'property'/'value' pair required.";
+                return "Error: Either 'properties' ({\"key\": value, ...}) or a 'property'/'value' pair required.";
             }
 
             so.ApplyModifiedProperties();
@@ -395,7 +395,7 @@ namespace UnityBridge.Editor
                     : null;
 
             if (props == null)
-                return "Error: Either 'properties' array or 'property'/'value' pair required.";
+                return "Error: Either 'properties' ({\"key\": value, ...}) or a 'property'/'value' pair required.";
 
             foreach (var kvp in props)
             {
@@ -480,7 +480,7 @@ namespace UnityBridge.Editor
                 }
                 else
                 {
-                    return "Error: Either 'properties' array or 'property'/'value' pair required.";
+                    return "Error: Either 'properties' ({\"key\": value, ...}) or a 'property'/'value' pair required.";
                 }
 
                 so.ApplyModifiedProperties();

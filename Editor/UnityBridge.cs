@@ -204,46 +204,58 @@ namespace UnityBridge.Editor
         {
             Debug.Log("[UnityBridge] Processing batch request");
 
-            // Parse JSON array for both deserialization and field validation
             JArray jArray;
-            List<BridgeRequest> requests;
             try
             {
                 jArray = JArray.Parse(json);
-                requests = jArray
-                    .OfType<JObject>()
-                    .Select(o => o.ToObject<BridgeRequest>())
-                    .Where(r => !string.IsNullOrEmpty(r?.type))
-                    .ToList();
             }
             catch (Exception ex)
             {
                 Debug.LogWarning($"[UnityBridge] Failed to parse batch request: {ex.Message}");
-                requests = new List<BridgeRequest>();
-                jArray = null;
+                WriteError($"Failed to parse batch request: {ex.Message}");
+                return;
             }
 
-            if (requests.Count == 0)
+            // Deserialize each item on its own — a malformed item must not discard its valid neighbours
+            var items = new List<(JObject jObj, BridgeRequest request, string parseError)>();
+            foreach (var jObj in jArray.OfType<JObject>())
             {
-                WriteError("Failed to parse batch request. Ensure it's a valid JSON array.");
+                var type = jObj["type"]?.ToString();
+                if (string.IsNullOrEmpty(type))
+                    continue;
+
+                try
+                {
+                    items.Add((jObj, jObj.ToObject<BridgeRequest>(), null));
+                }
+                catch (Exception ex)
+                {
+                    items.Add((jObj, null, ex.Message));
+                }
+            }
+
+            if (items.Count == 0)
+            {
+                WriteError("Empty batch: no items with a `type` field.");
                 return;
             }
 
             // Collect field warnings per batch item
             var warnings = new List<string>();
-            var jObjects = jArray?.OfType<JObject>()
-                .Where(o => !string.IsNullOrEmpty(o["type"]?.ToString()))
-                .ToList();
-
             var results = new List<(string type, bool success, string message)>();
-            for (int i = 0; i < requests.Count; i++)
+
+            for (int i = 0; i < items.Count; i++)
             {
-                var request = requests[i];
-                if (jObjects != null && i < jObjects.Count)
+                var (jObj, request, parseError) = items[i];
+
+                if (parseError != null)
                 {
-                    var w = ValidateFields(jObjects[i], request.type);
-                    if (w != null) warnings.Add($"[{i + 1}] {request.type}: {w.Trim()}");
+                    results.Add((jObj["type"].ToString(), false, $"Parse error: {parseError}"));
+                    continue;
                 }
+
+                var w = ValidateFields(jObj, request.type);
+                if (w != null) warnings.Add($"[{i + 1}] {request.type}: {w.Trim()}");
 
                 try
                 {
@@ -410,7 +422,7 @@ namespace UnityBridge.Editor
                 HandleAddComponentRequest),
             new("delete-component", "path, component", "Remove a component", "Write",
                 HandleDeleteComponentRequest),
-            new("set", "path, component, property/value or properties", "Set properties (component: \"GameObject\" for active)", "Write",
+            new("set", "path, component, property/value or properties: {\"key\": value, ...}", "Set properties (component: \"GameObject\" for active)", "Write",
                 HandleSetRequest),
             new("save-scene", "-", "Save current scene", "Write",
                 _ => HandleSaveSceneRequest()),
@@ -507,7 +519,9 @@ namespace UnityBridge.Editor
             public string component;      // Component type name
             public string property;       // Single property (for simple set)
             public JToken value;          // Single value - supports native JSON types
-            public PropertyKV[] properties;  // Property array for batch set
+
+            [JsonConverter(typeof(PropertyKVConverter))]
+            public PropertyKV[] properties;  // Property array for batch set - accepts array or object form
 
             // Prefab operations
             public string prefab;
@@ -540,6 +554,43 @@ namespace UnityBridge.Editor
         {
             public string key;
             public JToken value;          // Supports native JSON types: number, bool, array, string
+        }
+
+        /// <summary>
+        /// Accepts both shapes for `properties`:
+        ///   {"a": 1, "b": 2}                              - dict form, what agents write naturally
+        ///   [{"key": "a", "value": 1}, {"key": "b", ...}] - explicit KV array
+        /// </summary>
+        private class PropertyKVConverter : JsonConverter<PropertyKV[]>
+        {
+            public override PropertyKV[] ReadJson(JsonReader reader, Type objectType, PropertyKV[] existingValue,
+                bool hasExistingValue, JsonSerializer serializer)
+            {
+                var token = JToken.ReadFrom(reader);
+
+                if (token.Type == JTokenType.Null)
+                    return null;
+
+                if (token.Type == JTokenType.Object)
+                    return ((JObject)token).Properties()
+                        .Select(p => new PropertyKV { key = p.Name, value = p.Value })
+                        .ToArray();
+
+                if (token.Type == JTokenType.Array)
+                    return token.Select(item => new PropertyKV
+                    {
+                        key = item["key"]?.ToString(),
+                        value = item["value"]
+                    }).ToArray();
+
+                throw new JsonSerializationException(
+                    $"`properties` must be an object {{\"key\": value}} or an array [{{\"key\": ..., \"value\": ...}}], got {token.Type}");
+            }
+
+            public override void WriteJson(JsonWriter writer, PropertyKV[] value, JsonSerializer serializer) =>
+                throw new NotImplementedException();
+
+            public override bool CanWrite => false;
         }
 
         #endregion
